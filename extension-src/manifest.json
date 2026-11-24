@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Quillmark",
   "short_name": "Quillmark",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Edit PDFs in Chrome: type text, draw, highlight, white out, sign, fill forms, rearrange pages and save.",
   "icons": {
     "16": "icons/icon16.png",

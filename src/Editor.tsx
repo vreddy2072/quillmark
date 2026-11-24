@@ -9,6 +9,8 @@ import { findMatches, type Match } from "./search";
 import { printPdf } from "./print";
 import { rotateAnnotation } from "./geometry";
 import { fetchPdf } from "./platform";
+import { HistoryPanel } from "./HistoryPanel";
+import { recordOpen, reopenFile, type HistoryEntry } from "./history";
 import {
   FONTS,
   TEXT_LINE_HEIGHT,
@@ -94,6 +96,8 @@ function today() {
 export interface OpenRequest {
   file: File;
   handle: FileHandle | null;
+  /** Where the file was downloaded from (PDF links, file:// URLs). */
+  url?: string;
 }
 
 export interface EditorProps {
@@ -103,11 +107,13 @@ export interface EditorProps {
   initialUrl?: string;
   onStatus: (s: { name: string | null; dirty: boolean }) => void;
   onOpenMore: (list: OpenRequest[]) => void;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
 }
 
 const SIG_EVENT = "quillmark-signatures-changed";
 
-export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: EditorProps) {
+export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, historyOpen, onToggleHistory }: EditorProps) {
   const [file, setFile] = useState<Loaded | null>(null);
   const [doc, setDoc] = useState<DocState>(EMPTY);
   const [tool, setTool] = useState<Tool>("select");
@@ -235,14 +241,16 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
   // ---- Opening -------------------------------------------------------------
 
   const loadFile = useCallback(
-    async (f: File, handle: FileHandle | null = null) => {
+    async (f: File, handle: FileHandle | null = null, url?: string) => {
       setError(null);
       setBusy("Opening…");
       try {
         const bytes = new Uint8Array(await f.arrayBuffer());
         const pdf = await openPdf(bytes);
         file?.pdf.destroy();
-        const avail = (scrollRef.current?.clientWidth ?? 1000) - 96;
+        // A tab opened in the background is hidden (width 0), so estimate
+        // the viewer width from the window: thumbnails + options rail.
+        const avail = (scrollRef.current?.clientWidth || document.documentElement.clientWidth - 240) - 96;
         const maxW = Math.max(...pdf.pages.map((p) => viewportFor(p, 0).width));
         setZoom(Math.round(Math.min(1.5, Math.max(0.5, avail / maxW)) * 100) / 100);
         setFile({ name: f.name, bytes, pdf, handle, overwriteOk: false });
@@ -262,6 +270,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
         setTool("select");
         scrollRef.current?.scrollTo({ top: 0 });
         if (pdf.widgets.length) flash(`This PDF has ${pdf.widgets.length} fillable fields. Click a field to fill it in.`);
+        recordOpen({ file: f, handle, url, pages: pdf.pages.length });
       } catch (e) {
         console.error(e);
         setError(
@@ -280,7 +289,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
   const openFiles = (list: OpenRequest[]) => {
     if (!list.length) return;
     if (!file && !busy) {
-      loadFile(list[0].file, list[0].handle);
+      loadFile(list[0].file, list[0].handle, list[0].url);
       onOpenMore(list.slice(1));
     } else onOpenMore(list);
   };
@@ -299,18 +308,35 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
     }
   };
 
+  const openFromHistory = async (e: HistoryEntry) => {
+    setError(null);
+    try {
+      const r = await reopenFile(e);
+      if (r) openFiles([r]);
+      else if (e.url) {
+        setBusy("Downloading…");
+        const f = await fetchPdf(e.url);
+        setBusy(null);
+        openFiles([{ file: f, handle: null, url: e.url }]);
+      }
+    } catch (err) {
+      setBusy(null);
+      setError((err as Error)?.message ?? "That document couldn't be opened.");
+    }
+  };
+
   // Open the file this tab was created for.
   const opened = useRef(false);
   useEffect(() => {
     if (opened.current) return;
     if (initial) {
       opened.current = true;
-      loadFile(initial.file, initial.handle);
+      loadFile(initial.file, initial.handle, initial.url);
     } else if (initialUrl) {
       opened.current = true;
       setBusy("Downloading…");
       fetchPdf(initialUrl)
-        .then((f) => loadFile(f, null))
+        .then((f) => loadFile(f, null, initialUrl))
         .catch((e) => {
           console.error(e);
           setBusy(null);
@@ -539,6 +565,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
         }
         await writeTo(handle, out);
         setFile((f) => (f ? { ...f, handle, name: handle.name, overwriteOk: true } : f));
+        recordOpen({ file: new File([out as BlobPart], handle.name, { type: "application/pdf" }), handle, pages: docRef.current.pages.length });
         flash(`Saved as ${handle.name}`);
       } else {
         const a = document.createElement("a");
@@ -896,6 +923,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
       }}
       disabled={!file}
       title={`${label} (${key})`}
+      aria-label={label}
       aria-pressed={tool === t}
     >
       {icon}
@@ -928,13 +956,15 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
     <div className="app" style={active ? undefined : { display: "none" }} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <header className="topbar">
         <div className="brand">
-          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" width={26} height={26} />
-          <div>
-            <div className="brand-name">Quillmark</div>
-            <div className="file-name" title={file?.name}>
-              {file ? `${file.name}${dirty ? " · unsaved changes" : ""}` : "No file open"}
-            </div>
-          </div>
+          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" width={20} height={20} />
+          <span className="file-name" title={file?.name ?? "Quillmark"}>
+            {file ? file.name : "Quillmark"}
+          </span>
+          {dirty && <span className="dirty-dot" title="Unsaved changes" aria-label="Unsaved changes" />}
+          <span className="vsep" />
+          <button className={`icon sm ${historyOpen ? "on" : ""}`} onClick={onToggleHistory} title="Show or hide history" aria-label="History" aria-pressed={historyOpen}>
+            {icons.history}
+          </button>
         </div>
 
         <div className="tools" role="toolbar" aria-label="Tools">
@@ -952,6 +982,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
               onClick={() => setSignMenu((o) => !o)}
               disabled={!file}
               title="Sign, initial or date (S)"
+              aria-label="Sign"
               aria-expanded={signMenu}
             >
               {icons.sign}
@@ -994,20 +1025,66 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
               </div>
             )}
           </div>
-          <button className="tool" onClick={() => imgInput.current?.click()} disabled={!file} title="Add image (I)">
+          <button className="tool" onClick={() => imgInput.current?.click()} disabled={!file} title="Add image (I)" aria-label="Image">
             {icons.image}
             <span>Image</span>
           </button>
         </div>
 
         <div className="actions">
-          <button className="ghost icon-only" onClick={openDialog} title="Open PDF (Ctrl+O)" aria-label="Open PDF">
+          {file && (
+            <>
+                  {searchOpen ? (
+                    <div className="searchbox">
+                      {icons.search}
+                      <input
+                        ref={searchInput}
+                        value={query}
+                        placeholder="Find in document"
+                        aria-label="Find in document"
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") stepMatch(e.shiftKey ? -1 : 1);
+                          else if (e.key === "Escape") {
+                            setSearchOpen(false);
+                            setQuery("");
+                            setMatches([]);
+                          }
+                          e.stopPropagation();
+                        }}
+                      />
+                      <span className="search-count">{query.trim() ? (matches.length ? `${matchIdx + 1} of ${matches.length}` : "No results") : ""}</span>
+                      <button className="mini" onClick={() => stepMatch(-1)} disabled={!matches.length} aria-label="Previous match">
+                        {icons.up}
+                      </button>
+                      <button className="mini" onClick={() => stepMatch(1)} disabled={!matches.length} aria-label="Next match">
+                        {icons.down}
+                      </button>
+                      <button
+                        className="mini"
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setQuery("");
+                          setMatches([]);
+                        }}
+                        aria-label="Close search"
+                      >
+                        {icons.close}
+                      </button>
+                    </div>
+                  ) : (
+                    <button className="icon" onClick={openSearch} title="Find (Ctrl+F)" aria-label="Find in document">
+                      {icons.search}
+                    </button>
+                  )}
+              <span className="vsep" />
+            </>
+          )}
+          <button className="icon sm" onClick={openDialog} title="Open PDF (Ctrl+O)" aria-label="Open PDF">
             {icons.open}
-            <span>Open</span>
           </button>
-          <button className="ghost icon-only" onClick={print} disabled={!file || !!busy} title="Print (Ctrl+P)" aria-label="Print">
+          <button className="icon sm" onClick={print} disabled={!file || !!busy} title="Print (Ctrl+P)" aria-label="Print">
             {icons.print}
-            <span>Print</span>
           </button>
           <div className="split">
             <button
@@ -1026,177 +1103,8 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
         </div>
       </header>
 
-      {file && (
-        <div className="subbar">
-          <div className="group">
-            <button className={`icon ${sidebar ? "on" : ""}`} onClick={() => setSidebar((s) => !s)} title="Show or hide pages" aria-label="Toggle page thumbnails">
-              {icons.sidebar}
-            </button>
-            <span className="vsep" />
-            <button className="icon" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)" aria-label="Undo">
-              {icons.undo}
-            </button>
-            <button className="icon" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Y)" aria-label="Redo">
-              {icons.redo}
-            </button>
-            <button className="icon" onClick={deleteSelected} disabled={!selectedId} title="Delete selected (Del)" aria-label="Delete selected">
-              {icons.trash}
-            </button>
-          </div>
-
-          <div className="group options">
-            {showInk && (
-              <div className="opt">
-                <span className="label">Colour</span>
-                {INK_COLORS.map((c) => (
-                  <button key={c} className={`swatch ${curColor === c ? "on" : ""}`} style={{ background: c }} onClick={() => pickColor(c)} aria-label={`Colour ${c}`} />
-                ))}
-              </div>
-            )}
-            {showWidth && (
-              <div className="opt">
-                <span className="label">Size</span>
-                {MARKER_WIDTHS.map((wd) => (
-                  <button
-                    key={wd}
-                    className={`chip ${(sk === "ink" ? (selected as { width: number }).width : markerWidth) === wd ? "on" : ""}`}
-                    onClick={() => pickWidth(wd)}
-                    aria-label={`Marker size ${wd}`}
-                  >
-                    <span className="dot" style={{ width: wd * 2 + 2, height: wd * 2 + 2 }} />
-                  </button>
-                ))}
-              </div>
-            )}
-            {showFont && (
-              <div className="opt">
-                <span className="label">Text</span>
-                <select value={curFont} onChange={(e) => pickFont(e.target.value as FontFamily)} aria-label="Font">
-                  {(Object.keys(FONTS) as FontFamily[]).map((f) => (
-                    <option key={f} value={f}>
-                      {FONTS[f].label}
-                    </option>
-                  ))}
-                </select>
-                <select value={curSize} onChange={(e) => pickFontSize(Number(e.target.value))} aria-label="Font size">
-                  {[...new Set([...FONT_SIZES, curSize])].sort((a, b) => a - b).map((s) => (
-                    <option key={s} value={s}>
-                      {s} pt
-                    </option>
-                  ))}
-                </select>
-                <button className={`chip bold ${curBold ? "on" : ""}`} onClick={toggleBold} aria-label="Bold" aria-pressed={curBold} title="Bold">
-                  B
-                </button>
-              </div>
-            )}
-            {showHl && (
-              <div className="opt">
-                <span className="label">Highlight</span>
-                {HIGHLIGHT_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    className={`swatch ${(sk === "highlight" || selHl ? (selected as { color: string }).color : highlightColor) === c ? "on" : ""}`}
-                    style={{ background: c }}
-                    onClick={() => pickHighlight(c)}
-                    aria-label={`Highlight colour ${c}`}
-                  />
-                ))}
-              </div>
-            )}
-            {(tool === "highlight" || selHl) && (
-              <div className="opt">
-                <span className="label">Width</span>
-                {HL_WIDTHS.map((wd) => (
-                  <button
-                    key={wd}
-                    className={`chip ${(selHl ? (selected as { width: number }).width : highlightWidth) === wd ? "on" : ""}`}
-                    onClick={() => pickHlWidth(wd)}
-                    aria-label={`Highlighter width ${wd}`}
-                  >
-                    <span className="hl-bar" style={{ height: wd * 0.75, background: highlightColor }} />
-                  </button>
-                ))}
-              </div>
-            )}
-            {showMark && (
-              <div className="opt">
-                <span className="label">Mark size</span>
-                {MARK_SIZES.map((s) => (
-                  <button
-                    key={s}
-                    className={`chip ${(sk === "mark" ? (selected as { size: number }).size : markSize) === s ? "on" : ""}`}
-                    onClick={() => pickMarkSize(s)}
-                    aria-label={`Mark size ${s}`}
-                  >
-                    <span className="mark-dot" style={{ fontSize: s * 0.9 }}>✓</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {hint && <span className="hint">{hint}</span>}
-          </div>
-
-          <div className="group">
-            {searchOpen ? (
-              <div className="searchbox">
-                {icons.search}
-                <input
-                  ref={searchInput}
-                  value={query}
-                  placeholder="Find in document"
-                  aria-label="Find in document"
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") stepMatch(e.shiftKey ? -1 : 1);
-                    else if (e.key === "Escape") {
-                      setSearchOpen(false);
-                      setQuery("");
-                      setMatches([]);
-                    }
-                    e.stopPropagation();
-                  }}
-                />
-                <span className="search-count">{query.trim() ? (matches.length ? `${matchIdx + 1} of ${matches.length}` : "No results") : ""}</span>
-                <button className="mini" onClick={() => stepMatch(-1)} disabled={!matches.length} aria-label="Previous match">
-                  {icons.up}
-                </button>
-                <button className="mini" onClick={() => stepMatch(1)} disabled={!matches.length} aria-label="Next match">
-                  {icons.down}
-                </button>
-                <button
-                  className="mini"
-                  onClick={() => {
-                    setSearchOpen(false);
-                    setQuery("");
-                    setMatches([]);
-                  }}
-                  aria-label="Close search"
-                >
-                  {icons.close}
-                </button>
-              </div>
-            ) : (
-              <button className="icon" onClick={openSearch} title="Find (Ctrl+F)" aria-label="Find in document">
-                {icons.search}
-              </button>
-            )}
-            <span className="vsep" />
-            <span className="page-ind">
-              Page {Math.min(currentPage + 1, doc.pages.length)} of {doc.pages.length}
-            </span>
-            <button className="icon" onClick={() => changeZoom(-1)} title="Zoom out" aria-label="Zoom out">
-              {icons.zoomOut}
-            </button>
-            <span className="zoom-val">{Math.round(zoom * 100)}%</span>
-            <button className="icon" onClick={() => changeZoom(1)} title="Zoom in" aria-label="Zoom in">
-              {icons.zoomIn}
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="body">
+        {historyOpen && <HistoryPanel onOpen={openFromHistory} onClose={onToggleHistory} currentName={file?.name} />}
         {file && sidebar && (
           <Sidebar
             pages={doc.pages}
@@ -1208,37 +1116,162 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: Ed
             onMove={movePage}
           />
         )}
-        <main className="viewer" ref={scrollRef} onScroll={onScroll} onPointerDown={() => setSignMenu(false)}>
-          {!file ? (
-            <div className="empty">
-              <div className="empty-card">
-                <div className="empty-icon">{icons.file}</div>
-                <h1>Open a PDF to start editing</h1>
-                <p>Fill in, sign, add text, check boxes, highlight, white out and rearrange pages. Save merges your edits into the PDF.</p>
-                <button className="primary big" onClick={openDialog}>
-                  {icons.open}
-                  <span>Open PDF</span>
-                </button>
-                <p className="drop-hint">or drop a PDF file anywhere in this window</p>
+        <div className="viewer-wrap">
+          <main className="viewer" ref={scrollRef} onScroll={onScroll} onPointerDown={() => setSignMenu(false)}>
+            {!file ? (
+              <div className="empty">
+                <div className="empty-card">
+                  <div className="empty-icon">{icons.file}</div>
+                  <h1>Open a PDF to start editing</h1>
+                  <p>Fill in, sign, add text, check boxes, highlight, white out and rearrange pages. Save merges your edits into the PDF.</p>
+                  <button className="primary big" onClick={openDialog}>
+                    {icons.open}
+                    <span>Open PDF</span>
+                  </button>
+                  <p className="drop-hint">or drop a PDF file anywhere in this window</p>
+                </div>
               </div>
+            ) : (
+              <div className="pages">
+                {doc.pages.map((p) => (
+                  <PageView
+                    key={p.id}
+                    pdfPage={file.pdf.pages[p.src]}
+                    pageRef={p}
+                    annotations={doc.annotations.filter((a) => a.pageId === p.id)}
+                    widgets={file.pdf.widgets.filter((wd) => wd.src === p.src)}
+                    fields={doc.fields}
+                    search={searchByPage.get(p.id) ?? []}
+                    api={api}
+                  />
+                ))}
+              </div>
+            )}
+          </main>
+          {file && hint && <div className="hint-chip">{hint}</div>}
+        </div>
+        {file && (
+          <aside className="rail" aria-label="Edit options">
+            <button className={`icon ${sidebar ? "on" : ""}`} onClick={() => setSidebar((s) => !s)} title="Show or hide pages" aria-label="Toggle page thumbnails">
+              {icons.sidebar}
+            </button>
+            <span className="hsep" />
+            <button className="icon" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)" aria-label="Undo">
+              {icons.undo}
+            </button>
+            <button className="icon" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Y)" aria-label="Redo">
+              {icons.redo}
+            </button>
+            <button className="icon" onClick={deleteSelected} disabled={!selectedId} title="Delete selected (Del)" aria-label="Delete selected">
+              {icons.trash}
+            </button>
+            <div className="rail-options">
+          {showInk && (
+            <div className="opt">
+              <span className="label">Colour</span>
+              {INK_COLORS.map((c) => (
+                <button key={c} className={`swatch ${curColor === c ? "on" : ""}`} style={{ background: c }} onClick={() => pickColor(c)} aria-label={`Colour ${c}`} />
+              ))}
             </div>
-          ) : (
-            <div className="pages">
-              {doc.pages.map((p) => (
-                <PageView
-                  key={p.id}
-                  pdfPage={file.pdf.pages[p.src]}
-                  pageRef={p}
-                  annotations={doc.annotations.filter((a) => a.pageId === p.id)}
-                  widgets={file.pdf.widgets.filter((wd) => wd.src === p.src)}
-                  fields={doc.fields}
-                  search={searchByPage.get(p.id) ?? []}
-                  api={api}
+          )}
+          {showWidth && (
+            <div className="opt">
+              <span className="label">Size</span>
+              {MARKER_WIDTHS.map((wd) => (
+                <button
+                  key={wd}
+                  className={`chip ${(sk === "ink" ? (selected as { width: number }).width : markerWidth) === wd ? "on" : ""}`}
+                  onClick={() => pickWidth(wd)}
+                  aria-label={`Marker size ${wd}`}
+                >
+                  <span className="dot" style={{ width: wd * 2 + 2, height: wd * 2 + 2 }} />
+                </button>
+              ))}
+            </div>
+          )}
+          {showFont && (
+            <div className="opt">
+              <span className="label">Text</span>
+              <select value={curFont} onChange={(e) => pickFont(e.target.value as FontFamily)} aria-label="Font">
+                {(Object.keys(FONTS) as FontFamily[]).map((f) => (
+                  <option key={f} value={f}>
+                    {FONTS[f].label}
+                  </option>
+                ))}
+              </select>
+              <select value={curSize} onChange={(e) => pickFontSize(Number(e.target.value))} aria-label="Font size">
+                {[...new Set([...FONT_SIZES, curSize])].sort((a, b) => a - b).map((s) => (
+                  <option key={s} value={s}>
+                    {s} pt
+                  </option>
+                ))}
+              </select>
+              <button className={`chip bold ${curBold ? "on" : ""}`} onClick={toggleBold} aria-label="Bold" aria-pressed={curBold} title="Bold">
+                B
+              </button>
+            </div>
+          )}
+          {showHl && (
+            <div className="opt">
+              <span className="label">Highlight</span>
+              {HIGHLIGHT_COLORS.map((c) => (
+                <button
+                  key={c}
+                  className={`swatch ${(sk === "highlight" || selHl ? (selected as { color: string }).color : highlightColor) === c ? "on" : ""}`}
+                  style={{ background: c }}
+                  onClick={() => pickHighlight(c)}
+                  aria-label={`Highlight colour ${c}`}
                 />
               ))}
             </div>
           )}
-        </main>
+          {(tool === "highlight" || selHl) && (
+            <div className="opt">
+              <span className="label">Width</span>
+              {HL_WIDTHS.map((wd) => (
+                <button
+                  key={wd}
+                  className={`chip ${(selHl ? (selected as { width: number }).width : highlightWidth) === wd ? "on" : ""}`}
+                  onClick={() => pickHlWidth(wd)}
+                  aria-label={`Highlighter width ${wd}`}
+                >
+                  <span className="hl-bar" style={{ height: wd * 0.75, background: highlightColor }} />
+                </button>
+              ))}
+            </div>
+          )}
+          {showMark && (
+            <div className="opt">
+              <span className="label">Mark size</span>
+              {MARK_SIZES.map((s) => (
+                <button
+                  key={s}
+                  className={`chip ${(sk === "mark" ? (selected as { size: number }).size : markSize) === s ? "on" : ""}`}
+                  onClick={() => pickMarkSize(s)}
+                  aria-label={`Mark size ${s}`}
+                >
+                  <span className="mark-dot" style={{ fontSize: s * 0.9 }}>✓</span>
+                </button>
+              ))}
+            </div>
+          )}
+            </div>
+            <div className="rail-foot">
+              <span className="page-ind" title="Current page">
+                {Math.min(currentPage + 1, doc.pages.length)}
+                <span className="of">of {doc.pages.length}</span>
+              </span>
+              <span className="hsep" />
+              <button className="icon" onClick={() => changeZoom(1)} title="Zoom in" aria-label="Zoom in">
+                {icons.zoomIn}
+              </button>
+              <span className="zoom-val">{Math.round(zoom * 100)}%</span>
+              <button className="icon" onClick={() => changeZoom(-1)} title="Zoom out" aria-label="Zoom out">
+                {icons.zoomOut}
+              </button>
+            </div>
+          </aside>
+        )}
       </div>
 
       {sigDialog && <SignatureDialog kind={sigDialog} onDone={onSignatureDone} onCancel={() => setSigDialog(null)} />}

@@ -51,6 +51,19 @@ extensions now and then; that is expected for an extension you load yourself.
   not read pages and sends nothing anywhere.
 - Saved signatures are kept separately from the desktop app.
 
+## Layout
+
+- **Top bar**: the file name, History, the tools (hover for names and keys),
+  Find, Open, Print and Save.
+- **Right-hand rail**: page thumbnails on/off, undo, redo, delete, the options
+  for the current tool (colour, size, font), the page number and zoom.
+- **Tabs** can be dragged to reorder them, or moved with Ctrl+Shift+PageUp /
+  PageDown.
+- **History** (clock button) lists recently opened documents. Click one to
+  reopen it; Chrome may ask once to let Quillmark view the file again. Remove
+  an entry with its x, or Clear the list. History is kept only on this
+  computer, separately for the desktop app and the extension.
+
 ## Using it
 
 | Tool | Key | What it does |

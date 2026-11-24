@@ -120,7 +120,7 @@ export async function stashForTab(r: OpenRequest): Promise<string> {
   const d = await db();
   await new Promise<void>((resolve, reject) => {
     const tx = d.transaction("files", "readwrite");
-    tx.objectStore("files").put({ file: r.file, handle: r.handle, at: Date.now() }, id);
+    tx.objectStore("files").put({ file: r.file, handle: r.handle, url: r.url, at: Date.now() }, id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -130,7 +130,7 @@ export async function stashForTab(r: OpenRequest): Promise<string> {
 
 export async function takeStashed(id: string): Promise<OpenRequest | null> {
   const d = await db();
-  const rec = await new Promise<{ file: File; handle: OpenRequest["handle"] } | undefined>((resolve, reject) => {
+  const rec = await new Promise<{ file: File; handle: OpenRequest["handle"]; url?: string } | undefined>((resolve, reject) => {
     const tx = d.transaction("files", "readwrite");
     const store = tx.objectStore("files");
     const get = store.get(id);
@@ -141,7 +141,7 @@ export async function takeStashed(id: string): Promise<OpenRequest | null> {
     tx.onerror = () => reject(tx.error);
   });
   d.close();
-  return rec ? { file: rec.file, handle: rec.handle ?? null } : null;
+  return rec ? { file: rec.file, handle: rec.handle ?? null, url: rec.url } : null;
 }
 
 /** Open each request in its own new Chrome tab, right after this one. */

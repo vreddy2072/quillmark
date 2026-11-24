@@ -1297,3 +1297,417 @@ rect.whiteout:hover,
 .tab-settings {
   margin-left: auto;
 }
+
+/* ---- Compact layout (v0.4): slim top bar, options rail on the right ----- */
+
+.topbar {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 4px 12px;
+  min-height: 44px;
+}
+
+.brand {
+  gap: 8px;
+}
+
+.brand .file-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  min-width: 0;
+}
+
+.dirty-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tools {
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+}
+
+.tool {
+  min-width: 0;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 9px;
+}
+
+.tool span,
+.tool > span {
+  display: none;
+}
+
+.tool svg {
+  width: 17px;
+  height: 17px;
+}
+
+.tool-sep {
+  margin: 5px 3px;
+}
+
+.actions {
+  align-items: center;
+  gap: 4px;
+}
+
+.icon.sm {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.actions .primary {
+  padding: 6px 12px;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.actions .split-right {
+  padding: 6px 8px !important;
+}
+
+.actions .primary svg {
+  width: 16px;
+  height: 16px;
+}
+
+.actions .searchbox input {
+  width: 150px;
+  padding: 3px 4px;
+}
+
+/* Viewer area with the hint chip floating over it */
+
+.body {
+  position: relative;
+}
+
+.viewer-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+
+.hint-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 48px);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  color: var(--text-2);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 50;
+}
+
+/* Right-hand options rail */
+
+.rail {
+  flex: none;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: #fff;
+  border-left: 1px solid var(--nav-border);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.hsep {
+  flex: none;
+  width: 28px;
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.rail-options {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  width: 100%;
+}
+
+.rail .opt {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail .label {
+  margin: 0;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  max-width: 60px;
+}
+
+.rail .swatch {
+  width: 20px;
+  height: 20px;
+}
+
+.rail .chip {
+  width: 30px;
+  height: 28px;
+}
+
+.rail select {
+  width: 54px;
+  padding: 4px 2px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 10px;
+}
+
+.rail .page-ind {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.rail .page-ind .of {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.rail .zoom-val {
+  min-width: 0;
+  font-size: 11px;
+}
+
+/* History panel */
+
+.history {
+  width: 264px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--card-2);
+  border-right: 1px solid var(--nav-border);
+  min-height: 0;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 10px 8px 16px;
+}
+
+.history-title {
+  flex: 1;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.link-btn {
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.link-btn:hover {
+  color: var(--accent);
+}
+
+.history-head .mini {
+  height: 26px;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.history-head .mini:hover {
+  background: var(--subtle);
+}
+
+.history-head .mini svg,
+.history-remove svg {
+  width: 14px;
+  height: 14px;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+
+.history-empty {
+  margin: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.history-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+}
+
+.history-item:hover {
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.history-item.current .history-name {
+  color: var(--accent);
+}
+
+.history-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 8px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+.history-icon {
+  flex: none;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.history-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.history-text {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.history-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-remove {
+  visibility: hidden;
+  height: 26px;
+  margin-right: 4px;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.history-item:hover .history-remove,
+.history-remove:focus-visible {
+  visibility: visible;
+}
+
+.history-remove:hover {
+  background: var(--subtle);
+}
+
+/* Tabs: slimmer, and drag to reorder */
+
+.tabbar {
+  padding-top: 5px;
+}
+
+.tab.dragging {
+  opacity: 0.45;
+}
+
+.tab.drop-before {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tab.drop-after {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.tab {
+  padding: 5px 6px 5px 10px;
+  font-size: 12.5px;
+}
+
+.icon:focus-visible,
+.tool:focus-visible,
+.history-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

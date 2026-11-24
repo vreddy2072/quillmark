@@ -64,11 +64,62 @@ export function App() {
 
   const single = isExtension && settings.tabMode === "single";
 
-  const addTabs = useCallback((added: Tab[]) => {
+  // History panel: shown or hidden for all tabs, remembered on this computer.
+  const [historyOpen, setHistoryOpen] = useState(() => {
+    try {
+      return localStorage.getItem("quillmark.historyOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleHistory = useCallback(() => {
+    setHistoryOpen((o) => {
+      try {
+        localStorage.setItem("quillmark.historyOpen", o ? "0" : "1");
+      } catch {
+        /* ignore */
+      }
+      return !o;
+    });
+  }, []);
+
+  // ---- Reordering tabs by dragging -----------------------------------------
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  const moveTab = useCallback((id: string, to: number) => {
+    setTabs((list) => {
+      const from = list.findIndex((t) => t.id === id);
+      if (from < 0) return list;
+      const next = [...list];
+      const [t] = next.splice(from, 1);
+      next.splice(to > from ? to - 1 : to, 0, t);
+      return next;
+    });
+  }, []);
+  const TAB_MIME = "text/x-quillmark-tab";
+
+  // Ctrl+Shift+PageUp / PageDown moves the current tab left or right.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || (e.key !== "PageUp" && e.key !== "PageDown")) return;
+      const i = tabs.findIndex((t) => t.id === activeId);
+      const to = e.key === "PageUp" ? i - 1 : i + 2;
+      if (i < 0 || to < 0 || to > tabs.length) return;
+      e.preventDefault();
+      moveTab(activeId, to);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tabs, activeId, moveTab]);
+
+  const addTabs = useCallback((added: Tab[], replaceBlank = false) => {
     if (!added.length) return;
     setTabs((list) => {
-      // Replace a lone empty tab rather than leaving it behind.
-      const keep = list.length === 1 && !list[0].name && !list[0].initial && !list[0].url && !list[0].dirty ? [] : list;
+      // A link opened from outside replaces a lone empty tab rather than
+      // leaving it behind. (Not for files opened from inside a tab: that tab
+      // is loading the first of them.)
+      const blankOnly = list.length === 1 && !list[0].name && !list[0].initial && !list[0].url && !list[0].dirty;
+      const keep = replaceBlank && blankOnly ? [] : list;
       return [...keep, ...added];
     });
     setActiveId(added[added.length - 1].id);
@@ -84,7 +135,7 @@ export function App() {
   );
 
   // The background worker sends PDF links here when using Quillmark tabs.
-  useEffect(() => onOpenUrlRequest((url) => addTabs([blank(undefined, url)])), [addTabs]);
+  useEffect(() => onOpenUrlRequest((url) => addTabs([blank(undefined, url)], true)), [addTabs]);
 
   const newTab = () => {
     const t = blank();
@@ -135,15 +186,43 @@ export function App() {
       {showTabBar && (
         <nav className="tabbar" aria-label="Open documents">
           <div className="tabs" role="tablist">
-            {tabs.map((t) => (
+            {tabs.map((t, i) => (
               <div
                 key={t.id}
                 role="tab"
                 aria-selected={t.id === activeId}
-                className={`tab ${t.id === activeId ? "active" : ""}`}
-                title={t.name ?? "New tab"}
+                className={`tab ${t.id === activeId ? "active" : ""} ${dragId === t.id ? "dragging" : ""} ${
+                  dropAt === i && dragId ? "drop-before" : ""
+                } ${dropAt === i + 1 && i === tabs.length - 1 && dragId ? "drop-after" : ""}`}
+                title={t.name ? `${t.name} (drag to reorder)` : "New tab"}
+                draggable={tabs.length > 1}
                 onClick={() => setActiveId(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(TAB_MIME, t.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  setDragId(t.id);
+                  setActiveId(t.id);
+                }}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes(TAB_MIME)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setDropAt(e.clientX < r.left + r.width / 2 ? i : i + 1);
+                }}
+                onDrop={(e) => {
+                  const id = e.dataTransfer.getData(TAB_MIME);
+                  if (!id) return;
+                  e.preventDefault();
+                  if (dropAt !== null) moveTab(id, dropAt);
+                  setDragId(null);
+                  setDropAt(null);
+                }}
+                onDragEnd={() => {
+                  setDragId(null);
+                  setDropAt(null);
+                }}
               >
                 <span className="tab-icon">{icons.file}</span>
                 <span className="tab-name">{t.name ?? "New tab"}</span>
@@ -181,6 +260,8 @@ export function App() {
           initialUrl={t.url}
           onStatus={statusFor(t.id)}
           onOpenMore={openMore}
+          historyOpen={historyOpen}
+          onToggleHistory={toggleHistory}
         />
       ))}
     </div>
