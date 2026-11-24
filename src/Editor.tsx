@@ -953,7 +953,6 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   else if (tool === "highlight") hint = "Drag along a line of text. Hold Shift for a straight line.";
   else if (tool === "whiteout") hint = "Drag over anything to cover it, like correction tape. Double-click a covered area to type new text.";
   else if (tool === "check" || tool === "cross") hint = "Click a box to mark it.";
-  else if (tool === "select" && !selected) hint = "Click an item to select it. Drag to move, corner dot to resize. Double-click text to edit.";
 
   const sigs = signatures.filter((s) => s.kind === "signature");
   const inits = signatures.filter((s) => s.kind === "initials");
