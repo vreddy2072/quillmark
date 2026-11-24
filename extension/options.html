@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quillmark settings</title>
+    <link rel="icon" href="icon.svg" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="icon.svg" alt="" width="36" height="36" />
+        <div>
+          <h1>Quillmark settings</h1>
+          <p class="sub">Changes save automatically.</p>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>Tabs</h2>
+        <p class="hint">How Quillmark shows several documents.</p>
+        <div class="choices" role="radiogroup" aria-label="Tabs">
+          <label class="choice">
+            <input type="radio" name="tabMode" value="tabs" />
+            <span class="choice-body">
+              <span class="choice-title">Quillmark tabs in one Chrome tab</span>
+              <span class="choice-text">The toolbar button opens one Quillmark tab, and each PDF gets its own tab inside it, like the desktop app.</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="tabMode" value="single" />
+            <span class="choice-body">
+              <span class="choice-title">One PDF per Chrome tab</span>
+              <span class="choice-text">Each PDF opens in its own Chrome tab. Use Chrome's tabs, Ctrl+Tab and Ctrl+W to move between and close them.</span>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Opening PDFs</h2>
+        <label class="toggle">
+          <span>
+            <span class="toggle-title">Open PDF links in Quillmark</span>
+            <span class="toggle-text">PDFs you click on websites open in Quillmark instead of Chrome's viewer. Downloads still download.</span>
+          </span>
+          <input type="checkbox" name="openLinks" role="switch" />
+        </label>
+        <label class="toggle">
+          <span>
+            <span class="toggle-title">Open PDFs from my computer in Quillmark</span>
+            <span class="toggle-text">PDFs opened from File Explorer when Chrome is your PDF app.</span>
+          </span>
+          <input type="checkbox" name="openLocalFiles" role="switch" />
+        </label>
+        <div id="file-access" class="notice" hidden>
+          <strong>One more step for PDFs from your computer.</strong>
+          <span>Chrome needs your permission. On Quillmark's details page, turn on <em>Allow access to file URLs</em>.</span>
+          <button id="open-extensions" class="ghost" type="button">Open extension details</button>
+        </div>
+        <p id="file-access-ok" class="ok" hidden>Access to local files is on.</p>
+      </section>
+
+      <div class="actions">
+        <button id="open-app" class="primary" type="button">Open Quillmark</button>
+      </div>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

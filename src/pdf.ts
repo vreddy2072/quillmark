@@ -6,6 +6,9 @@ import type { FieldValue } from "./types";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export { pdfjs };
+
+/** pdf.js support files copied beside the app at build time (see vite.config.ts). */
+const asset = (p: string) => new URL(`pdfjs/${p}`, document.baseURI).href;
 export type { PDFDocumentProxy, PDFPageProxy, PageViewport } from "pdfjs-dist";
 
 /** A form widget (one visible box of an AcroForm field) on an original page. */
@@ -32,7 +35,13 @@ export function viewportFor(page: PDFPageProxy, extraRot: number, scale = 1): Pa
 export async function openPdf(bytes: Uint8Array) {
   // pdf.js transfers the buffer it is given, so hand it a copy and keep the
   // original bytes for saving.
-  const task = pdfjs.getDocument({ data: bytes.slice() });
+  const task = pdfjs.getDocument({
+    data: bytes.slice(),
+    cMapUrl: asset("cmaps/"),
+    cMapPacked: true,
+    standardFontDataUrl: asset("standard_fonts/"),
+    wasmUrl: asset("wasm/"),
+  });
   const doc = await task.promise;
   const pages: PDFPageProxy[] = [];
   const widgets: Widget[] = [];

@@ -1,8 +1,12 @@
 # Quillmark
 
-A local Windows PDF editor. Open a PDF, add typed text, draw with a freehand
-marker, highlight, place images, and save a new PDF with the edits merged into
-the pages.
+A local PDF editor for Windows and Chrome. Open a PDF, add typed text, draw
+with a freehand marker, highlight, white out, sign, fill forms, rearrange pages,
+and save a new PDF with the edits merged into the pages. Nothing leaves your
+computer.
+
+It comes two ways from the same code: a desktop app (`Start Quillmark.cmd`)
+and a Chrome extension (the `extension/` folder).
 
 ## Run it
 
@@ -10,6 +14,42 @@ Double-click `Start Quillmark.cmd`. It needs Node.js (24 LTS) and nothing else:
 the built app is already in `dist/`, so there is no `npm install` step. The app
 opens in its own Microsoft Edge window at http://127.0.0.1:4317. Keep the small
 console window open while you work; close it to quit.
+
+## Chrome extension
+
+### Add it to Chrome
+
+1. Open Chrome and go to `chrome://extensions`.
+2. Turn on **Developer mode** (top right).
+3. Click **Load unpacked** and choose the `extension` folder inside this
+   folder (for example `C:\projects\apps\Quillmark\extension`).
+4. Click the puzzle-piece icon in Chrome's toolbar and pin **Quillmark**.
+5. To open PDFs from File Explorer in Quillmark: click **Details** on the
+   Quillmark card and turn on **Allow access to file URLs**. Also make Chrome
+   your PDF app in Windows (right-click a PDF, Open with, Choose another app).
+
+The settings page opens the first time. Open it again from the gear in
+Quillmark's tab bar, or by right-clicking the toolbar button and picking
+**Quillmark settings**.
+
+To update after pulling new code, click the reload arrow on the Quillmark card
+in `chrome://extensions`. Chrome may show a reminder about developer-mode
+extensions now and then; that is expected for an extension you load yourself.
+
+### How it behaves
+
+- **Toolbar button** opens Quillmark (or switches to it).
+- **Tabs setting**: *Quillmark tabs in one Chrome tab* (the default, like the
+  desktop app) or *One PDF per Chrome tab*.
+- **PDF links** you click on websites open in Quillmark instead of Chrome's
+  viewer. Links that download a file still download. Turn this off in settings.
+  Right-click any link for **Open link in Quillmark**.
+- **Saving**: files opened with Open or dragged in can be saved over the
+  original. PDFs opened from a link or File Explorer use Save as.
+- Chrome warns at install that Quillmark can "read and change all your data on
+  all websites". It needs that to notice PDF links and download them; it does
+  not read pages and sends nothing anywhere.
+- Saved signatures are kept separately from the desktop app.
 
 ## Using it
 
@@ -65,11 +105,18 @@ pdf.js for rendering and pdf-lib for writing the saved PDF.
 
 ```
 npm ci
-npm run dev      # http://127.0.0.1:4317 with hot reload
-npm run build    # type-check and rebuild dist/
+npm run dev              # http://127.0.0.1:4317 with hot reload
+npm run build            # type-check, rebuild dist/ and extension/
+npm run build:desktop    # only dist/
+npm run build:extension  # only extension/
 ```
 
-Code map: `src/App.tsx` (toolbar, state, undo, open/save/print),
+The extension's own files (manifest, background worker, settings page and
+icons) are in `extension-src/` and are copied into `extension/` by the build.
+
+Code map: `src/App.tsx` (tabs), `src/Editor.tsx` (one document: toolbar,
+state, undo, open/save/print), `src/platform.ts` (desktop vs extension:
+settings, opening links, handing files to other Chrome tabs),
 `src/PageView.tsx` (page rendering, drawing and editing on a page, form
 fields), `src/Sidebar.tsx` (page thumbnails), `src/SignatureDialog.tsx`,
 `src/search.ts`, `src/print.ts`, `src/save.ts` (merging edits, page changes and

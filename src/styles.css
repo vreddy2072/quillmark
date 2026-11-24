@@ -1293,3 +1293,7 @@ rect.whiteout:hover,
   background: #ebe9e4;
   color: var(--text);
 }
+
+.tab-settings {
+  margin-left: auto;
+}

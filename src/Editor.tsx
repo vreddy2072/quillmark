@@ -8,6 +8,7 @@ import { buildEditedPdf } from "./save";
 import { findMatches, type Match } from "./search";
 import { printPdf } from "./print";
 import { rotateAnnotation } from "./geometry";
+import { fetchPdf } from "./platform";
 import {
   FONTS,
   TEXT_LINE_HEIGHT,
@@ -98,13 +99,15 @@ export interface OpenRequest {
 export interface EditorProps {
   active: boolean;
   initial?: OpenRequest;
+  /** A PDF link or file:// URL to download and open (Chrome extension). */
+  initialUrl?: string;
   onStatus: (s: { name: string | null; dirty: boolean }) => void;
   onOpenMore: (list: OpenRequest[]) => void;
 }
 
 const SIG_EVENT = "quillmark-signatures-changed";
 
-export function Editor({ active, initial, onStatus, onOpenMore }: EditorProps) {
+export function Editor({ active, initial, initialUrl, onStatus, onOpenMore }: EditorProps) {
   const [file, setFile] = useState<Loaded | null>(null);
   const [doc, setDoc] = useState<DocState>(EMPTY);
   const [tool, setTool] = useState<Tool>("select");
@@ -299,9 +302,20 @@ export function Editor({ active, initial, onStatus, onOpenMore }: EditorProps) {
   // Open the file this tab was created for.
   const opened = useRef(false);
   useEffect(() => {
-    if (initial && !opened.current) {
+    if (opened.current) return;
+    if (initial) {
       opened.current = true;
       loadFile(initial.file, initial.handle);
+    } else if (initialUrl) {
+      opened.current = true;
+      setBusy("Downloading…");
+      fetchPdf(initialUrl)
+        .then((f) => loadFile(f, null))
+        .catch((e) => {
+          console.error(e);
+          setBusy(null);
+          setError(`Couldn't open ${initialUrl}. ${(e as Error)?.message ?? ""}`.trim());
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -313,8 +327,16 @@ export function Editor({ active, initial, onStatus, onOpenMore }: EditorProps) {
   // Saved signatures are shared by all tabs.
   useEffect(() => {
     const reload = () => setSignatures(loadSignatures());
+    // Other Chrome tabs (extension, one PDF per tab) change localStorage directly.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key.endsWith(".signatures.v1")) reload();
+    };
     window.addEventListener(SIG_EVENT, reload);
-    return () => window.removeEventListener(SIG_EVENT, reload);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(SIG_EVENT, reload);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   // ---- Pages ---------------------------------------------------------------
@@ -906,7 +928,7 @@ export function Editor({ active, initial, onStatus, onOpenMore }: EditorProps) {
     <div className="app" style={active ? undefined : { display: "none" }} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <header className="topbar">
         <div className="brand">
-          <img src="/icon.svg" alt="" width={26} height={26} />
+          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" width={26} height={26} />
           <div>
             <div className="brand-name">Quillmark</div>
             <div className="file-name" title={file?.name}>
