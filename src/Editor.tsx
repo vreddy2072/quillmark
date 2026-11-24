@@ -30,7 +30,11 @@ const MARKER_WIDTHS = [1.5, 3, 6];
 const HL_WIDTHS = [8, 12, 16];
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 24, 32, 48];
 const MARK_SIZES = [10, 14, 20];
-const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+// Zoom buttons step by 25%; any value in this range can be typed in.
+const ZOOM_STEP = 0.25;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 4;
+const clampZoom = (z: number) => Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 100) / 100;
 
 export type FileHandle = {
   name: string;
@@ -860,9 +864,11 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
     setCurrentPage(best);
   };
 
+  // From a fitted value like 137%, the first step lands on 150% or 125%.
   const changeZoom = (dir: 1 | -1) => {
-    const next = dir > 0 ? ZOOMS.find((z) => z > zoom + 0.001) : [...ZOOMS].reverse().find((z) => z < zoom - 0.001);
-    if (next) setZoom(next);
+    const steps = zoom / ZOOM_STEP;
+    const next = dir > 0 ? (Math.floor(steps + 1e-6) + 1) * ZOOM_STEP : (Math.ceil(steps - 1e-6) - 1) * ZOOM_STEP;
+    setZoom(clampZoom(next < ZOOM_MIN ? ZOOM_MIN : next));
   };
 
   const api: PageApi = useMemo(
@@ -1265,7 +1271,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
               <button className="icon" onClick={() => changeZoom(1)} title="Zoom in" aria-label="Zoom in">
                 {icons.zoomIn}
               </button>
-              <span className="zoom-val">{Math.round(zoom * 100)}%</span>
+              <ZoomInput zoom={zoom} onZoom={(z) => setZoom(clampZoom(z))} />
               <button className="icon" onClick={() => changeZoom(-1)} title="Zoom out" aria-label="Zoom out">
                 {icons.zoomOut}
               </button>
@@ -1305,5 +1311,53 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         }}
       />
     </div>
+  );
+}
+
+/** The zoom percentage in the rail. Click it, type a number and press Enter. */
+function ZoomInput({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
+  const shown = `${Math.round(zoom * 100)}%`;
+  const [text, setText] = useState<string | null>(null);
+  const cancelled = useRef(false);
+  const justFocused = useRef(false);
+  const apply = () => {
+    if (text !== null && !cancelled.current) {
+      const n = parseFloat(text.replace("%", "").trim());
+      if (Number.isFinite(n) && n > 0) onZoom(n / 100);
+    }
+    cancelled.current = false;
+    setText(null);
+  };
+  return (
+    <input
+      className="zoom-input"
+      value={text ?? shown}
+      inputMode="numeric"
+      aria-label="Zoom percentage"
+      title={`Zoom: type ${Math.round(ZOOM_MIN * 100)}–${Math.round(ZOOM_MAX * 100)} and press Enter`}
+      onFocus={(e) => {
+        justFocused.current = true;
+        e.target.select();
+      }}
+      onMouseUp={(e) => {
+        // Keep the whole value selected after a click, so typing replaces it.
+        if (justFocused.current) e.preventDefault();
+        justFocused.current = false;
+      }}
+      onChange={(e) => setText(e.target.value.replace(/[^0-9.%]/g, "").slice(0, 5))}
+      onBlur={apply}
+      onKeyDown={(e) => {
+        const el = e.target as HTMLInputElement;
+        if (e.key === "Enter") el.blur();
+        else if (e.key === "Escape") {
+          cancelled.current = true;
+          el.blur();
+        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const n = parseFloat((text ?? shown).replace("%", "")) || zoom * 100;
+          setText(`${Math.round(n + (e.key === "ArrowUp" ? 5 : -5))}%`);
+        }
+      }}
+    />
   );
 }

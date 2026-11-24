@@ -56,7 +56,8 @@ extensions now and then; that is expected for an extension you load yourself.
 - **Top bar**: the file name, History, the tools (hover for names and keys),
   Find, Open, Print and Save.
 - **Right-hand rail**: page thumbnails on/off, undo, redo, delete, the options
-  for the current tool (colour, size, font), the page number and zoom.
+  for the current tool (colour, size, font), the page number and zoom. Zoom
+  steps by 25%; click the percentage to type any value from 10% to 400%.
 - **Tabs** can be dragged to reorder them, or moved with Ctrl+Shift+PageUp /
   PageDown.
 - **History** (clock button) lists recently opened documents. Click one to
