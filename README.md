@@ -98,7 +98,7 @@ opened, after asking once. Save as (the small button next to Save, or
 Ctrl+Shift+S) writes a new file and keeps the original. Print (Ctrl+P) prints
 the document with all your edits.
 
-Also: Ctrl+O open, Ctrl+Z undo, Ctrl+Y redo, Delete removes the selected item, Ctrl+C copies selected document text.
+Also: Ctrl+O open, Ctrl+Z undo, Ctrl+Y redo, Delete removes the selected item, Ctrl+C copies selected document text, Ctrl+V pastes copied text (as a text box you can drag and double-click to edit) or a copied image onto the page you are looking at.
 
 ## Known limits
 

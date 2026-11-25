@@ -429,6 +429,60 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
     return viewportFor(file!.pdf.pages[ref.src], ref.rot);
   };
 
+  /** Vertical middle (page units) of the part of the page that is on screen. */
+  const visibleMidY = (pageId: string) => {
+    const vp = pageSize(pageId);
+    const el = document.querySelector<HTMLElement>(`[data-page-id="${pageId}"]`);
+    const sc = scrollRef.current?.getBoundingClientRect();
+    if (!el || !sc) return vp.height / 2;
+    const r = el.getBoundingClientRect();
+    return ((Math.max(r.top, sc.top) + Math.min(r.bottom, sc.bottom)) / 2 - r.top) / zoom;
+  };
+
+  /** Ctrl+V with text on the clipboard: drop it on the page as a text box to drag or edit. */
+  const insertText = (raw: string) => {
+    if (!file) return;
+    const pageId = currentPageId();
+    const vp = pageSize(pageId);
+    const size = fontSize;
+    // Wrap long lines so a pasted paragraph fits on the page.
+    const maxChars = Math.max(10, Math.floor((vp.width * 0.8) / (size * 0.5)));
+    const lines: string[] = [];
+    for (const para of raw.replace(/\r\n?/g, "\n").replace(/\t/g, "    ").replace(/\s+$/, "").split("\n")) {
+      let line = "";
+      for (const word of para.split(" ")) {
+        if (line && (line + " " + word).length > maxChars) {
+          lines.push(line.trimEnd());
+          line = word;
+        } else line = line ? `${line} ${word}` : word;
+      }
+      lines.push(line.trimEnd());
+    }
+    while (lines.length && !lines[0].trim()) lines.shift();
+    if (!lines.length) return;
+    const estW = Math.max(...lines.map((l) => l.length)) * size * 0.5;
+    const estH = lines.length * size * TEXT_LINE_HEIGHT;
+    const t: TextAnnotation = {
+      id: newId(),
+      pageId,
+      kind: "text",
+      x: Math.max(8, (vp.width - estW) / 2),
+      y: Math.min(Math.max(0, vp.height - estH), Math.max(0, visibleMidY(pageId) - estH / 2)),
+      text: lines.join("\n"),
+      size,
+      color,
+      font,
+      bold,
+      rot: 0,
+    };
+    finishEdit();
+    commitAnns([...docRef.current.annotations, t]);
+    setPlacing(null);
+    setTool("select");
+    setSelectedId(t.id);
+    flash("Text pasted. Drag to move, double-click to edit.");
+  };
+
   const insertImage = useCallback(
     async (f: File) => {
       if (!file) return;
@@ -442,14 +496,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         const s = Math.min(1, (Math.min(vp.width, vp.height) * 0.6) / Math.max(iw, ih));
         iw *= s;
         ih *= s;
-        // Centre on the visible part of the page.
-        const el = document.querySelector<HTMLElement>(`[data-page-id="${pageId}"]`);
-        const sc = scrollRef.current!.getBoundingClientRect();
-        let cy = vp.height / 2;
-        if (el) {
-          const r = el.getBoundingClientRect();
-          cy = ((Math.max(r.top, sc.top) + Math.min(r.bottom, sc.bottom)) / 2 - r.top) / zoom;
-        }
+        const cy = visibleMidY(pageId);
         const a: ImageAnnotation = {
           id: newId(),
           pageId,
@@ -799,8 +846,15 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
     };
     const onPaste = (e: ClipboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return;
+      if (!file) return;
+      // Text wins when there is any: Word and other apps also put a picture
+      // of the copied text on the clipboard.
+      const text = e.clipboardData?.getData("text/plain") ?? "";
       const f = [...(e.clipboardData?.files ?? [])].find((x) => x.type.startsWith("image/"));
-      if (f && file) {
+      if (text.trim()) {
+        e.preventDefault();
+        insertText(text);
+      } else if (f) {
         e.preventDefault();
         insertImage(f);
       }
