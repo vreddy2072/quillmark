@@ -475,20 +475,45 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
     return viewportFor(file!.pdf.pages[ref.src], ref.rot);
   };
 
-  /** Vertical middle (page units) of the part of the page that is on screen. */
-  const visibleMidY = (pageId: string) => {
-    const vp = pageSize(pageId);
-    const el = document.querySelector<HTMLElement>(`[data-page-id="${pageId}"]`);
-    const sc = scrollRef.current?.getBoundingClientRect();
-    if (!el || !sc) return vp.height / 2;
-    const r = el.getBoundingClientRect();
-    return ((Math.max(r.top, sc.top) + Math.min(r.bottom, sc.bottom)) / 2 - r.top) / zoom;
+  /** The page under the middle of the viewer right now (worked out fresh, not from the last scroll). */
+  const pageInView = () => {
+    const sc = scrollRef.current;
+    if (!sc) return currentPageId();
+    const mid = sc.getBoundingClientRect().top + sc.clientHeight / 2;
+    let best: string | null = null;
+    let bestDist = Infinity;
+    sc.querySelectorAll<HTMLElement>("[data-page-id]").forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const d = mid < r.top ? r.top - mid : mid > r.bottom ? mid - r.bottom : 0;
+      if (d < bestDist) {
+        bestDist = d;
+        best = el.dataset.pageId ?? null;
+      }
+    });
+    return best && docRef.current.pages.some((p) => p.id === best) ? best : currentPageId();
   };
+
+  /** Middle (page units) of the part of the page that is on screen. */
+  const visibleMid = (pageId: string) => {
+    const vp = pageSize(pageId);
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-page-id="${pageId}"]`);
+    const sc = scrollRef.current?.getBoundingClientRect();
+    if (!el || !sc) return { x: vp.width / 2, y: vp.height / 2 };
+    const r = el.getBoundingClientRect();
+    const mid = (lo: number, hi: number, a: number, b: number, size: number) =>
+      b <= a ? size / 2 : ((Math.max(lo, a) + Math.min(hi, b)) / 2 - lo) / zoom;
+    return {
+      x: Math.min(vp.width, Math.max(0, mid(r.left, r.right, sc.left, sc.right, vp.width))),
+      y: Math.min(vp.height, Math.max(0, mid(r.top, r.bottom, sc.top, sc.bottom, vp.height))),
+    };
+  };
+  const visibleMidY = (pageId: string) => visibleMid(pageId).y;
+
 
   /** Ctrl+V with text on the clipboard: drop it on the page as a text box to drag or edit. */
   const insertText = (raw: string) => {
     if (!file) return;
-    const pageId = currentPageId();
+    const pageId = pageInView();
     const vp = pageSize(pageId);
     const size = fontSize;
     // Wrap long lines so a pasted paragraph fits on the page.
@@ -512,7 +537,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       id: newId(),
       pageId,
       kind: "text",
-      x: Math.max(8, (vp.width - estW) / 2),
+      x: Math.min(Math.max(8, vp.width - estW), Math.max(8, visibleMid(pageId).x - estW / 2)),
       y: Math.min(Math.max(0, vp.height - estH), Math.max(0, visibleMidY(pageId) - estH / 2)),
       text: lines.join("\n"),
       size,
@@ -534,7 +559,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       if (!file) return;
       try {
         const { src, w, h } = await fileToImage(f);
-        const pageId = currentPageId();
+        const pageId = pageInView();
         const vp = pageSize(pageId);
         // Images come in at 96 dpi, capped to 60% of the page; something
         // copied in Quillmark keeps its size.
@@ -544,13 +569,14 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         const s = own ? Math.min(1, vp.width / iw, vp.height / ih) : Math.min(1, (Math.min(vp.width, vp.height) * 0.6) / Math.max(iw, ih));
         iw *= s;
         ih *= s;
-        const cy = visibleMidY(pageId);
+        // Centre on the part of the page that's on screen.
+        const c = visibleMid(pageId);
         const a: ImageAnnotation = {
           id: newId(),
           pageId,
           kind: "image",
-          x: (vp.width - iw) / 2,
-          y: Math.min(vp.height - ih, Math.max(0, cy - ih / 2)),
+          x: Math.min(vp.width - iw, Math.max(0, c.x - iw / 2)),
+          y: Math.min(vp.height - ih, Math.max(0, c.y - ih / 2)),
           w: iw,
           h: ih,
           src,
