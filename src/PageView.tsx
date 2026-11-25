@@ -62,8 +62,15 @@ type Draft =
   | { kind: "highlight" | "whiteout"; x0: number; y0: number; x1: number; y1: number }
   | null;
 
+interface CursorSpec {
+  svg: string;
+  size: number;
+  hx: number;
+  hy: number;
+}
+
 /** A pen cursor whose tip (the hotspot, bottom-left) shows the ink colour. */
-function penCursor(color: string) {
+function penCursor(color: string): CursorSpec {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
 <g stroke-linejoin="round" stroke-linecap="round">
 <path d="M22.2 4.2L19.8 1.8L4.8 16.8L2 22L7.2 19.2z" fill="#ffffff" stroke="#ffffff" stroke-width="2.4"/>
@@ -72,11 +79,11 @@ function penCursor(color: string) {
 <path d="M4.8 16.8L2 22L7.2 19.2z" fill="#E8E6E0" stroke="#1A1A1A" stroke-width="1"/>
 <path d="M2 22L3.3 19.7L4.3 20.7z" fill="${color}" stroke="${color}" stroke-width="0.8"/>
 </g></svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 2 22, crosshair`;
+  return { svg, size: 24, hx: 2, hy: 22 };
 }
 
 /** A highlighter with a flat chisel tip; the hotspot is the middle of the tip. */
-function highlighterCursor(color: string) {
+function highlighterCursor(color: string): CursorSpec {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
 <g stroke-linejoin="round">
 <path d="M25.6 7.6L20.4 2.4L7.4 15.4L2.2 20.6L7.4 25.8L12.6 20.6z" fill="#ffffff" stroke="#ffffff" stroke-width="2.6"/>
@@ -85,7 +92,64 @@ function highlighterCursor(color: string) {
 <path d="M10.6 12.2L15.8 17.4L12.6 20.6L7.4 15.4z" fill="#E8E6E0" stroke="#1A1A1A" stroke-width="1"/>
 <path d="M7.4 15.4L12.6 20.6L7.4 25.8L2.2 20.6z" fill="${color}" stroke="#1A1A1A" stroke-width="1"/>
 </g></svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 4 23, crosshair`;
+  return { svg, size: 28, hx: 4, hy: 23 };
+}
+
+function svgCursor({ svg, hx, hy }: CursorSpec) {
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hx} ${hy}, crosshair`;
+}
+
+/*
+ * Chromium on Windows often drops SVG cursors on high-DPI screens and falls
+ * back to the crosshair, so the cursor is also drawn to PNGs (1x and the
+ * screen's pixel ratio). The SVG cursor is used until the PNGs are ready.
+ */
+const pngCursors = new Map<string, Promise<string>>();
+
+function pngCursor(spec: CursorSpec): Promise<string> {
+  const key = spec.svg;
+  let p = pngCursors.get(key);
+  if (!p) {
+    p = new Promise<string>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const draw = (scale: number) => {
+          const c = document.createElement("canvas");
+          c.width = c.height = Math.round(spec.size * scale);
+          c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+          return c.toDataURL("image/png");
+        };
+        const dpr = Math.min(4, Math.max(1, window.devicePixelRatio || 1));
+        const one = draw(1);
+        const { hx, hy } = spec;
+        const set =
+          dpr > 1 ? `image-set(url("${one}") 1x, url("${draw(dpr)}") ${dpr}x) ${hx} ${hy}, ` : "";
+        resolve(`${set}url("${one}") ${hx} ${hy}, crosshair`);
+      };
+      img.onerror = reject;
+      img.src = `data:image/svg+xml,${encodeURIComponent(spec.svg)}`;
+    });
+    pngCursors.set(key, p);
+  }
+  return p;
+}
+
+function useToolCursor(spec: CursorSpec | null) {
+  const key = spec?.svg ?? "";
+  const [png, setPng] = useState<{ key: string; css: string } | null>(null);
+  useEffect(() => {
+    if (!spec) return;
+    let live = true;
+    pngCursor(spec).then(
+      (css) => live && setPng({ key: spec.svg, css }),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [key]); // the spec object is rebuilt each render; its SVG is the identity
+  if (!spec) return undefined;
+  return png?.key === key ? png.css : svgCursor(spec);
 }
 
 /** Local (unrotated) size of a selectable item, used for resize handles. */
@@ -115,6 +179,13 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
   const textEls = useRef(new Map<string, HTMLElement>());
   const [visible, setVisible] = useState(false);
   const [draft, setDraft] = useState<Draft>(null);
+  const cursor = useToolCursor(
+    tool === "marker"
+      ? penCursor(api.color)
+      : tool === "highlight"
+        ? highlighterCursor(api.highlightColor)
+        : null,
+  );
 
   // Render only pages near the viewport.
   useEffect(() => {
@@ -387,13 +458,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       <canvas ref={canvasRef} className="page-canvas" />
       <div
         className="overlay"
-        style={
-          tool === "marker"
-            ? { cursor: penCursor(api.color) }
-            : tool === "highlight"
-              ? { cursor: highlighterCursor(api.highlightColor) }
-              : undefined
-        }
+        style={cursor ? { cursor } : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
