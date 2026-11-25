@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { backgroundHex, backgroundToAlpha, rgbHex, sampleBackground } from "./block";
 import { pdfjs, toViewRect, viewportFor, type PDFPageProxy, type Widget } from "./pdf";
 import { inkBounds, rotatePoint, smoothPath } from "./geometry";
 import {
@@ -39,7 +40,14 @@ export interface PageApi {
   create: (a: Annotation, opts?: { edit?: boolean; keepTool?: boolean }) => void;
   createMany: (list: Annotation[], editId?: string) => void;
   /** Block select: cover the area and add the lifted copy as a movable image. */
-  lift: (cover: Annotation, block: Annotation) => void;
+  lift: (cover: Annotation, block: Annotation, absorbed: string[]) => void;
+  /** Render a box of the page as it would be saved, with only the given items drawn. */
+  renderBlock: (
+    pageId: string,
+    r: { x: number; y: number; w: number; h: number },
+    include: Annotation[],
+    scale: number,
+  ) => Promise<HTMLCanvasElement | null>;
   place: (pageId: string, x: number, y: number) => void;
   checkpoint: () => void;
   updateLive: (id: string, patch: Partial<Annotation>) => void;
@@ -344,7 +352,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
           // Cover the area like correction tape. Typing a replacement is optional
           // (double-click the covered area).
           api.create(
-            { id: newId(), pageId: pageRef.id, kind: "whiteout", x, y, w: ww, h: hh, color: "#FFFFFF" },
+            { id: newId(), pageId: pageRef.id, kind: "whiteout", x, y, w: ww, h: hh, color: coverColor(x, y, ww, hh) },
             { keepTool: true },
           );
         }
@@ -353,35 +361,45 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
     setDraft(null);
   };
 
+  /** Page background colour around a box (page units), for covers. */
+  const coverColor = (x: number, y: number, w: number, h: number) => {
+    const c = canvasRef.current;
+    const s = c && c.width ? c.width / vp.width : 1;
+    return backgroundHex(c, x * s, y * s, w * s, h * s);
+  };
+
   /**
-   * Block select: draw the page's own content inside the box to an image,
-   * cover the original spot, and hand back the image to drag, cut or copy.
-   * (Items added in Quillmark stay where they are.)
+   * Block select: picture everything visible in the box (the page's own
+   * content and items added in Quillmark), cover the spot in the page's
+   * background colour, and hand back the picture as a block to drag, cut or
+   * copy. Items entirely inside the box move with it.
    */
   const liftBlock = async (x: number, y: number, w: number, h: number) => {
+    const r = { x, y, w, h };
+    const boxOf = (a: Annotation) => localBox(a, textEls.current.get(a.id) ?? null, zoom);
+    const within = (a: Annotation) => {
+      const b = boxOf(a);
+      return b.x >= x - 0.5 && b.y >= y - 0.5 && b.x + b.w <= x + w + 0.5 && b.y + b.h <= y + h + 0.5;
+    };
+    const touches = (a: Annotation) => {
+      const b = boxOf(a);
+      return b.x < x + w && b.x + b.w > x && b.y < y + h && b.y + b.h > y;
+    };
+    const inside = annotations.filter((a) => a.kind !== "whiteout" && within(a));
+    // Covers that reach into the box keep that part blank in the picture.
+    const include = annotations.filter((a) => inside.includes(a) || (a.kind === "whiteout" && touches(a)));
     const scale = Math.min(4, Math.max(2, zoom * (window.devicePixelRatio || 1)));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(w * scale));
-    canvas.height = Math.max(1, Math.round(h * scale));
+    let canvas: HTMLCanvasElement | null = null;
     try {
-      await pdfPage.render({
-        canvas,
-        viewport: viewportFor(pdfPage, pageRef.rot, scale),
-        transform: [1, 0, 0, 1, -x * scale, -y * scale],
-        annotationMode: widgets.length ? pdfjs.AnnotationMode.ENABLE_FORMS : pdfjs.AnnotationMode.ENABLE,
-      }).promise;
+      canvas = await api.renderBlock(pageRef.id, r, include, scale);
     } catch (e) {
       console.error(e);
-      return;
     }
-    // Areas already covered (cut or whited out) stay blank in the copy.
-    const g = canvas.getContext("2d")!;
-    for (const a of annotations)
-      if (a.kind === "whiteout") {
-        g.fillStyle = a.color;
-        g.fillRect((a.x - x) * scale, (a.y - y) * scale, a.w * scale, a.h * scale);
-      }
-    const cover: Annotation = { id: newId(), pageId: pageRef.id, kind: "whiteout", x, y, w, h, color: "#FFFFFF" };
+    if (!canvas) return;
+    const bgRgb = sampleBackground(canvas, 0, 0, canvas.width - 1, canvas.height - 1);
+    const bg = rgbHex(bgRgb);
+    backgroundToAlpha(canvas, bgRgb);
+    const cover: Annotation = { id: newId(), pageId: pageRef.id, kind: "whiteout", x, y, w, h, color: bg };
     const block: Annotation = {
       id: newId(),
       pageId: pageRef.id,
@@ -392,9 +410,8 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       h,
       src: canvas.toDataURL("image/png"),
       rot: 0,
-      blend: "multiply",
     };
-    api.lift(cover, block);
+    api.lift(cover, block, inside.map((a) => a.id));
   };
 
   // Start typing replacement text inside a whiteout.
@@ -547,7 +564,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       y: y0 - pad,
       w: x1 - x0 + pad * 2,
       h: y1 - y0 + pad * 2.5,
-      color: "#FFFFFF",
+      color: coverColor(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2.5),
     };
     // Line the new baseline up with the old one (pdf.js puts the span top at
     // roughly 0.8 em above the baseline).

@@ -1015,11 +1015,40 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           setSelectedId(a.id);
         }
       },
-      lift: (cover, block) => {
+      renderBlock: async (pageId, r, include, scale) => {
+        // Draw exactly what saving would produce for this page (the page plus
+        // the given items), then cut out the box.
+        const ref = docRef.current.pages.find((p) => p.id === pageId);
+        if (!file || !ref) return null;
+        const bytes = await buildEditedPdf(
+          file.bytes,
+          file.pdf.pages,
+          { pages: [ref], annotations: include, fields: docRef.current.fields },
+          file.pdf.fields,
+        );
+        const tmp = await openPdf(bytes);
+        try {
+          const page = tmp.pages[0];
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(r.w * scale));
+          canvas.height = Math.max(1, Math.round(r.h * scale));
+          await page.render({
+            canvas,
+            viewport: page.getViewport({ scale }),
+            transform: [1, 0, 0, 1, -r.x * scale, -r.y * scale],
+          }).promise;
+          return canvas;
+        } finally {
+          tmp.destroy();
+        }
+      },
+      lift: (cover, block, absorbed) => {
         finishEdit();
         // The cover goes underneath everything already added, so only the
-        // page's own content is hidden; the lifted block goes on top.
-        commitAnns([cover, ...docRef.current.annotations, block]);
+        // page's own content is hidden; items inside the box are now part of
+        // the lifted block, which goes on top.
+        const gone = new Set(absorbed);
+        commitAnns([cover, ...docRef.current.annotations.filter((a) => !gone.has(a.id)), block]);
         setTool("select");
         setSelectedId(block.id);
         flash("Block selected. Drag it to move, Ctrl+X to cut, Ctrl+C to copy, Delete to erase. Ctrl+Z puts it back.");
@@ -1043,7 +1072,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       finishEdit,
       setField,
     }),
-    [tool, zoom, color, markerWidth, highlightColor, highlightWidth, fontSize, font, bold, markSize, selectedId, editingId, commitAnns, place, checkpoint, updateLive, finishEdit, setField],
+    [tool, zoom, color, markerWidth, highlightColor, highlightWidth, fontSize, font, bold, markSize, selectedId, editingId, commitAnns, place, checkpoint, updateLive, finishEdit, setField, file],
   );
 
   useEffect(() => {
