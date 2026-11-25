@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { icons } from "./icons";
 import { openPdf, viewportFor, type OpenedPdf } from "./pdf";
-import { PageView, type PageApi, type SearchRect } from "./PageView";
+import { PageView, type PageApi, type PendingBlock, type SearchRect } from "./PageView";
 import { Sidebar } from "./Sidebar";
 import { SignatureDialog, loadSignatures, storeSignatures, type SavedSignature } from "./SignatureDialog";
 import { buildEditedPdf } from "./save";
@@ -164,6 +164,9 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   const [markSize, setMarkSize] = useState(MARK_SIZES[0]);
   const [zoom, setZoom] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pendingBlock, setPendingBlock] = useState<PendingBlock | null>(null);
+  const pendingRef = useRef<PendingBlock | null>(null);
+  pendingRef.current = pendingBlock;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -855,6 +858,36 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
     }
   };
 
+  // ---- Select block: act on a marked block ---------------------------------
+
+  /**
+   * Only now does the page change: the spot is covered in the page colour,
+   * items inside the box go with the block, and (when moved) the block is
+   * placed as a picture at its new spot.
+   */
+  const commitBlock = useCallback(
+    (mode: "move" | "cut" | "erase", dx = 0, dy = 0) => {
+      const p = pendingRef.current;
+      if (!p) return;
+      const gone = new Set(p.absorbed);
+      const rest = docRef.current.annotations.filter((a) => !gone.has(a.id));
+      // The cover goes underneath everything already added, so only the
+      // page's own content (and the absorbed items) disappear.
+      const moved = mode === "move" ? [{ ...p.block, id: newId(), x: p.block.x + dx, y: p.block.y + dy }] : [];
+      commitAnns([p.cover, ...rest, ...moved]);
+      setPendingBlock(null);
+      if (moved.length) {
+        setTool("select");
+        setSelectedId(moved[0].id);
+        flash("Moved. Drag to adjust; Ctrl+Z puts it back.");
+      }
+    },
+    [commitAnns],
+  );
+
+  // Changing tool or document lets go of a marked block.
+  useEffect(() => setPendingBlock(null), [tool, file]);
+
   // ---- Keyboard, paste, drop, unload guard ---------------------------------
 
   useEffect(() => {
@@ -864,6 +897,21 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       const typing = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
+      const pb = pendingRef.current;
+      if (pb && !typing && ((mod && (k === "c" || k === "x")) || e.key === "Delete" || e.key === "Backspace" || e.key === "Escape")) {
+        e.preventDefault();
+        if (e.key === "Escape") setPendingBlock(null);
+        else if (e.key === "Delete" || e.key === "Backspace") commitBlock("erase");
+        else
+          copyAnnotation(pb.block).then((ok) => {
+            if (!ok) return setError("Couldn't copy that to the clipboard.");
+            if (k === "x") {
+              commitBlock("cut");
+              flash("Cut. Press Ctrl+V to paste it.");
+            } else flash("Copied. Press Ctrl+V to paste a copy; the original stays as it is.");
+          });
+        return;
+      }
       if (mod && k === "o") {
         e.preventDefault();
         openDialog();
@@ -1068,17 +1116,15 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           tmp.destroy();
         }
       },
-      lift: (cover, block, absorbed) => {
+      pending: pendingBlock,
+      offerBlock: (p) => {
         finishEdit();
-        // The cover goes underneath everything already added, so only the
-        // page's own content is hidden; items inside the box are now part of
-        // the lifted block, which goes on top.
-        const gone = new Set(absorbed);
-        commitAnns([cover, ...docRef.current.annotations.filter((a) => !gone.has(a.id)), block]);
-        setTool("select");
-        setSelectedId(block.id);
-        flash("Block selected. Drag it to move, Ctrl+X to cut, Ctrl+C to copy, Delete to erase. Ctrl+Z puts it back.");
+        setSelectedId(null);
+        setPendingBlock(p);
+        flash("Block selected. Drag it to move, Ctrl+C to copy, Ctrl+X to cut, Delete to erase. Click elsewhere or Esc to let go.");
       },
+      commitBlock,
+      clearPending: () => setPendingBlock(null),
       createMany: (list, editId) => {
         commitAnns([...docRef.current.annotations, ...list]);
         if (editId) {
@@ -1098,7 +1144,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       finishEdit,
       setField,
     }),
-    [tool, zoom, color, markerWidth, highlightColor, highlightWidth, fontSize, font, bold, markSize, selectedId, editingId, commitAnns, place, checkpoint, updateLive, finishEdit, setField, file],
+    [tool, zoom, color, markerWidth, highlightColor, highlightWidth, fontSize, font, bold, markSize, selectedId, editingId, commitAnns, place, checkpoint, updateLive, finishEdit, setField, file, pendingBlock, commitBlock],
   );
 
   useEffect(() => {

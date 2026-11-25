@@ -39,8 +39,12 @@ export interface PageApi {
   editingId: string | null;
   create: (a: Annotation, opts?: { edit?: boolean; keepTool?: boolean }) => void;
   createMany: (list: Annotation[], editId?: string) => void;
-  /** Block select: cover the area and add the lifted copy as a movable image. */
-  lift: (cover: Annotation, block: Annotation, absorbed: string[]) => void;
+  /** Block select: a marked block, not yet changed on the page. */
+  pending: PendingBlock | null;
+  offerBlock: (p: PendingBlock) => void;
+  /** Act on the marked block: move it by (dx, dy), cut it, or erase it. */
+  commitBlock: (mode: "move" | "cut" | "erase", dx?: number, dy?: number) => void;
+  clearPending: () => void;
   /** Render a box of the page as it would be saved, with only the given items drawn. */
   renderBlock: (
     pageId: string,
@@ -55,6 +59,16 @@ export interface PageApi {
   startEdit: (id: string) => void;
   finishEdit: () => void;
   setField: (name: string, value: FieldValue) => void;
+}
+
+export interface PendingBlock {
+  pageId: string;
+  /** Covers the original spot once the block is moved, cut or erased. */
+  cover: Annotation;
+  /** The picture of the block (page content plus items inside it). */
+  block: Annotation & { kind: "image" };
+  /** Items entirely inside the box; they travel with the block. */
+  absorbed: string[];
 }
 
 interface Props {
@@ -270,6 +284,8 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    // Clicking anywhere else lets go of a marked block, leaving the page as it was.
+    if (api.pending) api.clearPending();
     const [x, y] = toPage(e);
     if (tool === "marker" || tool === "highlight") {
       (e.target as Element).setPointerCapture(e.pointerId);
@@ -400,7 +416,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
     const bg = rgbHex(bgRgb);
     backgroundToAlpha(canvas, bgRgb);
     const cover: Annotation = { id: newId(), pageId: pageRef.id, kind: "whiteout", x, y, w, h, color: bg };
-    const block: Annotation = {
+    const block: PendingBlock["block"] = {
       id: newId(),
       pageId: pageRef.id,
       kind: "image",
@@ -411,7 +427,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       src: canvas.toDataURL("image/png"),
       rot: 0,
     };
-    api.lift(cover, block, inside.map((a) => a.id));
+    api.offerBlock({ pageId: pageRef.id, cover, block, absorbed: inside.map((a) => a.id) });
   };
 
   // Start typing replacement text inside a whiteout.
@@ -629,6 +645,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
             }
           }}
         />
+        {api.pending?.pageId === pageRef.id && <BlockMarquee p={api.pending} zoom={zoom} api={api} />}
         {annotations.map((a, i) => {
           const z = i + 1;
           if (a.kind === "text" || a.kind === "image") return null;
@@ -984,5 +1001,56 @@ function TextBox({
       {a.text}
       {selected && tool === "select" && <span className="handle text-handle" title="Drag to resize" onPointerDown={onResizeStart} />}
     </div>
+  );
+}
+
+/**
+ * A marked block: a dashed box over the page. Nothing on the page changes
+ * until it is dragged (moved), cut or erased.
+ */
+function BlockMarquee({ p, zoom, api }: { p: PendingBlock; zoom: number; api: PageApi }) {
+  const [off, setOff] = useState<[number, number] | null>(null);
+  const b = p.block;
+  const start = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let d: [number, number] = [0, 0];
+    const move = (ev: PointerEvent) => {
+      d = [(ev.clientX - x0) / zoom, (ev.clientY - y0) / zoom];
+      setOff(Math.hypot(d[0], d[1]) * zoom > 2 ? d : null);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setOff(null);
+      if (Math.hypot(d[0], d[1]) * zoom > 2) api.commitBlock("move", d[0], d[1]);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const box = (x: number, y: number): React.CSSProperties => ({
+    left: x * zoom,
+    top: y * zoom,
+    width: b.w * zoom,
+    height: b.h * zoom,
+  });
+  return (
+    <>
+      {off && (
+        <>
+          <div className="block-cover" style={{ ...box(b.x, b.y), background: (p.cover as { color: string }).color }} />
+          <img className="block-ghost" src={b.src} alt="" draggable={false} style={box(b.x + off[0], b.y + off[1])} />
+        </>
+      )}
+      <div
+        className="block-marquee"
+        style={box(b.x + (off?.[0] ?? 0), b.y + (off?.[1] ?? 0))}
+        title="Drag to move. Ctrl+C copies, Ctrl+X cuts, Delete erases, Esc lets go."
+        onPointerDown={start}
+      />
+    </>
   );
 }

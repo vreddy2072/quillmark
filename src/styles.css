@@ -1832,3 +1832,17 @@ rect.whiteout:hover,
   fill: rgba(217, 119, 87, 0.08);
   stroke: #d97757;
 }
+.block-marquee {
+  position: absolute;
+  z-index: 1002;
+  border: 1.5px dashed #d97757;
+  border-radius: 2px;
+  background: rgba(217, 119, 87, 0.06);
+  cursor: move;
+}
+.block-cover,
+.block-ghost {
+  position: absolute;
+  z-index: 1001;
+  pointer-events: none;
+}
