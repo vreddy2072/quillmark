@@ -69,7 +69,7 @@ extensions now and then; that is expected for an extension you load yourself.
 
 | Tool | Key | What it does |
 |------|-----|--------------|
-| Select | V | Click an item to select it, drag to move (arrow keys nudge), drag the corner dot to resize. Change its colour, font, size or bold in the bar below. Double-click text to edit it. |
+| Select | V | Click an item to select it, drag to move (arrow keys nudge), drag the corner dot to resize. Change its colour, font, size or bold in the bar below. Double-click text to edit it. Drag across the document's own text to select it, then Ctrl+C (or right-click, Copy) to copy it. |
 | Text | T | Click anywhere on a page and type. Enter adds a line, Esc finishes. Pick Sans, Serif or Mono, a size and bold. |
 | Marker | M | Freehand drawing in five colours and three thicknesses. |
 | Highlight | H | Drag a box over text to highlight it. |
@@ -98,7 +98,7 @@ opened, after asking once. Save as (the small button next to Save, or
 Ctrl+Shift+S) writes a new file and keeps the original. Print (Ctrl+P) prints
 the document with all your edits.
 
-Also: Ctrl+O open, Ctrl+Z undo, Ctrl+Y redo, Delete removes the selected item.
+Also: Ctrl+O open, Ctrl+Z undo, Ctrl+Y redo, Delete removes the selected item, Ctrl+C copies selected document text.
 
 ## Known limits
 

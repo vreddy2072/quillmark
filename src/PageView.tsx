@@ -111,6 +111,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
   const h = vp.height;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textLayerRef = useRef<HTMLDivElement>(null);
   const textEls = useRef(new Map<string, HTMLElement>());
   const [visible, setVisible] = useState(false);
   const [draft, setDraft] = useState<Draft>(null);
@@ -155,6 +156,28 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       task.cancel();
     };
   }, [pdfPage, pageRef.rot, zoom, visible, widgets.length]);
+
+  // Invisible text laid over the page so words can be selected and copied
+  // (Ctrl+C) with the Select tool, like in any PDF reader.
+  useEffect(() => {
+    const div = textLayerRef.current;
+    if (!visible || !div) return;
+    const layer = new pdfjs.TextLayer({
+      textContentSource: pdfPage.streamTextContent({ includeMarkedContent: true, disableNormalization: true }),
+      container: div,
+      viewport: viewportFor(pdfPage, pageRef.rot, zoom),
+    });
+    const end = document.createElement("div");
+    end.className = "endOfContent";
+    layer.render().then(
+      () => div.append(end),
+      () => {},
+    );
+    return () => {
+      layer.cancel();
+      div.replaceChildren();
+    };
+  }, [pdfPage, pageRef.rot, zoom, visible]);
 
   const toPage = (e: { clientX: number; clientY: number }): Point => {
     const r = wrapRef.current!.getBoundingClientRect();
@@ -376,6 +399,24 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
+        <div
+          ref={textLayerRef}
+          className="textLayer"
+          style={{ "--total-scale-factor": zoom } as React.CSSProperties}
+          onPointerDown={(e) => {
+            // While dragging, stretch the end marker over the page so the
+            // selection doesn't jump to the start when the pointer leaves the text.
+            if (selectable && e.button === 0) {
+              const div = e.currentTarget;
+              div.classList.add("selecting");
+              const up = () => {
+                div.classList.remove("selecting");
+                window.removeEventListener("pointerup", up);
+              };
+              window.addEventListener("pointerup", up);
+            }
+          }}
+        />
         {annotations.map((a, i) => {
           const z = i + 1;
           if (a.kind === "text" || a.kind === "image") return null;
