@@ -5,6 +5,13 @@ with a freehand marker, highlight, white out, sign, fill forms, rearrange pages,
 and save a new PDF with the edits merged into the pages. Nothing leaves your
 computer.
 
+Saved PDFs stay editable in Quillmark: the file also carries the untouched
+original and the list of changes, so reopening it in Quillmark brings back
+every text box, mark, image and signature as an item you can move, edit or
+delete. Other PDF readers just show the finished pages. (Files are about
+twice the size because of the stored original. If another program changes
+the file afterwards, Quillmark opens it as a normal PDF.)
+
 It comes two ways from the same code: a desktop app (`Start Quillmark.cmd`)
 and a Chrome extension (the `extension/` folder).
 

@@ -18,6 +18,7 @@ import {
 } from "pdf-lib";
 import type { PDFPageProxy, Widget } from "./pdf";
 import { viewportFor } from "./pdf";
+import { embedEditable } from "./editable";
 import { rotatePoint, smoothPath } from "./geometry";
 import {
   FONTS,
@@ -235,5 +236,7 @@ export async function buildEditedPdf(
     for (let i = libPages.length - 1; i >= 0; i--) doc.removePage(i);
     state.pages.forEach((ref, i) => doc.insertPage(i, libPages[ref.src]));
   }
-  return doc.save();
+  // Keep the changes editable when Quillmark opens this file again.
+  if (state.annotations.length || !unchanged || state.pages.some((p) => p.rot)) embedEditable(doc, original, state);
+  return doc.save({ useObjectStreams: false });
 }

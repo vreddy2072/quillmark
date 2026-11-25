@@ -5,6 +5,7 @@ import { PageView, type PageApi, type SearchRect } from "./PageView";
 import { Sidebar } from "./Sidebar";
 import { SignatureDialog, loadSignatures, storeSignatures, type SavedSignature } from "./SignatureDialog";
 import { buildEditedPdf } from "./save";
+import { extractEditable } from "./editable";
 import { findMatches, type Match } from "./search";
 import { printPdf } from "./print";
 import { rotateAnnotation } from "./geometry";
@@ -249,7 +250,11 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       setError(null);
       setBusy("Opening…");
       try {
-        const bytes = new Uint8Array(await f.arrayBuffer());
+        let bytes = new Uint8Array(await f.arrayBuffer());
+        // A PDF saved by Quillmark carries the original and the changes, so
+        // they can be edited again instead of being stuck in the page.
+        const ex = await extractEditable(bytes);
+        if (ex?.kind === "editable") bytes = new Uint8Array(ex.original);
         const pdf = await openPdf(bytes);
         file?.pdf.destroy();
         // A tab opened in the background is hidden (width 0), so estimate
@@ -258,11 +263,16 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         const maxW = Math.max(...pdf.pages.map((p) => viewportFor(p, 0).width));
         setZoom(Math.round(Math.min(1.5, Math.max(0.5, avail / maxW)) * 100) / 100);
         setFile({ name: f.name, bytes, pdf, handle, overwriteOk: false });
-        setDoc({
-          pages: pdf.pages.map((_, i) => ({ id: newId(), src: i, rot: 0 })),
-          annotations: [],
-          fields: { ...pdf.fields },
-        });
+        const restored = ex?.kind === "editable" && ex.state.pages.every((p) => p.src < pdf.pages.length) ? ex.state : null;
+        setDoc(
+          restored
+            ? { pages: restored.pages, annotations: restored.annotations, fields: { ...pdf.fields, ...restored.fields } }
+            : {
+                pages: pdf.pages.map((_, i) => ({ id: newId(), src: i, rot: 0 })),
+                annotations: [],
+                fields: { ...pdf.fields },
+              },
+        );
         past.current = [];
         future.current = [];
         setSelectedId(null);
@@ -273,7 +283,11 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         setPlacing(null);
         setTool("select");
         scrollRef.current?.scrollTo({ top: 0 });
-        if (pdf.widgets.length) flash(`This PDF has ${pdf.widgets.length} fillable fields. Click a field to fill it in.`);
+        if (restored?.annotations.length)
+          flash(`Your ${restored.annotations.length} change${restored.annotations.length === 1 ? "" : "s"} from last time can still be edited. Click one to select it.`);
+        else if (ex?.kind === "changed-elsewhere")
+          flash("This PDF was changed in another program after Quillmark saved it, so earlier Quillmark changes are now part of the page.");
+        else if (pdf.widgets.length) flash(`This PDF has ${pdf.widgets.length} fillable fields. Click a field to fill it in.`);
         recordOpen({ file: f, handle, url, pages: pdf.pages.length });
       } catch (e) {
         console.error(e);
