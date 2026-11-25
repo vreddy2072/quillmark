@@ -223,6 +223,7 @@ export async function buildEditedPdf(
           width: a.w,
           height: a.h,
           rotate: degrees(angleOf(corner, a.rot)),
+          ...(a.blend === "multiply" ? { blendMode: BlendMode.Multiply } : {}),
         });
       }
     }

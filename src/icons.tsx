@@ -137,6 +137,11 @@ export const icons = {
       <path d="M16 10v4" />
     </Icon>
   ),
+  area: (
+    <Icon>
+      <rect x="5" y="5" width="14" height="14" rx="1.5" strokeDasharray="3 2.6" />
+    </Icon>
+  ),
   editText: (
     <Icon>
       <path d="M4 7V5h10v2" />

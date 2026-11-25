@@ -49,6 +49,8 @@ export interface ImageAnnotation extends Base {
   src: string; // data: URL (PNG or JPEG)
   rot: number;
   role?: "signature" | "initials";
+  /** A block lifted from the page: its white background lets what's underneath show through. */
+  blend?: "multiply";
 }
 
 export interface MarkAnnotation extends Base {
@@ -74,6 +76,7 @@ export type Tool =
   | "highlight"
   | "whiteout"
   | "edittext" // retype a line of the PDF's own text
+  | "area" // select a block of the page to move, cut or copy
   | "check"
   | "cross"
   | "place"; // placing a signature / initials / date stamp

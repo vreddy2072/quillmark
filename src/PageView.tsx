@@ -38,6 +38,8 @@ export interface PageApi {
   editingId: string | null;
   create: (a: Annotation, opts?: { edit?: boolean; keepTool?: boolean }) => void;
   createMany: (list: Annotation[], editId?: string) => void;
+  /** Block select: cover the area and add the lifted copy as a movable image. */
+  lift: (cover: Annotation, block: Annotation) => void;
   place: (pageId: string, x: number, y: number) => void;
   checkpoint: () => void;
   updateLive: (id: string, patch: Partial<Annotation>) => void;
@@ -59,7 +61,7 @@ interface Props {
 
 type Draft =
   | { kind: "ink"; points: Point[]; hl: boolean }
-  | { kind: "highlight" | "whiteout"; x0: number; y0: number; x1: number; y1: number }
+  | { kind: "highlight" | "whiteout" | "area"; x0: number; y0: number; x1: number; y1: number }
   | null;
 
 interface CursorSpec {
@@ -264,7 +266,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
     if (tool === "marker" || tool === "highlight") {
       (e.target as Element).setPointerCapture(e.pointerId);
       setDraft({ kind: "ink", points: [[x, y]], hl: tool === "highlight" });
-    } else if (tool === "whiteout") {
+    } else if (tool === "whiteout" || tool === "area") {
       (e.target as Element).setPointerCapture(e.pointerId);
       setDraft({ kind: tool, x0: x, y0: y, x1: x, y1: y });
     } else if (tool === "text") {
@@ -334,7 +336,9 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       const ww = Math.abs(draft.x1 - draft.x0);
       const hh = Math.abs(draft.y1 - draft.y0);
       if (ww * zoom > 3 && hh * zoom > 3) {
-        if (draft.kind === "highlight") {
+        if (draft.kind === "area") {
+          liftBlock(x, y, ww, hh);
+        } else if (draft.kind === "highlight") {
           api.create({ id: newId(), pageId: pageRef.id, kind: "highlight", x, y, w: ww, h: hh, color: api.highlightColor });
         } else {
           // Cover the area like correction tape. Typing a replacement is optional
@@ -347,6 +351,50 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       }
     }
     setDraft(null);
+  };
+
+  /**
+   * Block select: draw the page's own content inside the box to an image,
+   * cover the original spot, and hand back the image to drag, cut or copy.
+   * (Items added in Quillmark stay where they are.)
+   */
+  const liftBlock = async (x: number, y: number, w: number, h: number) => {
+    const scale = Math.min(4, Math.max(2, zoom * (window.devicePixelRatio || 1)));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    try {
+      await pdfPage.render({
+        canvas,
+        viewport: viewportFor(pdfPage, pageRef.rot, scale),
+        transform: [1, 0, 0, 1, -x * scale, -y * scale],
+        annotationMode: widgets.length ? pdfjs.AnnotationMode.ENABLE_FORMS : pdfjs.AnnotationMode.ENABLE,
+      }).promise;
+    } catch (e) {
+      console.error(e);
+      return;
+    }
+    // Areas already covered (cut or whited out) stay blank in the copy.
+    const g = canvas.getContext("2d")!;
+    for (const a of annotations)
+      if (a.kind === "whiteout") {
+        g.fillStyle = a.color;
+        g.fillRect((a.x - x) * scale, (a.y - y) * scale, a.w * scale, a.h * scale);
+      }
+    const cover: Annotation = { id: newId(), pageId: pageRef.id, kind: "whiteout", x, y, w, h, color: "#FFFFFF" };
+    const block: Annotation = {
+      id: newId(),
+      pageId: pageRef.id,
+      kind: "image",
+      x,
+      y,
+      w,
+      h,
+      src: canvas.toDataURL("image/png"),
+      rot: 0,
+      blend: "multiply",
+    };
+    api.lift(cover, block);
   };
 
   // Start typing replacement text inside a whiteout.
@@ -661,6 +709,17 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
               style={draft.hl ? { mixBlendMode: "multiply" } : undefined}
             />
           )}
+          {draft?.kind === "area" && (
+            <rect
+              className="area-draft"
+              x={Math.min(draft.x0, draft.x1)}
+              y={Math.min(draft.y0, draft.y1)}
+              width={Math.abs(draft.x1 - draft.x0)}
+              height={Math.abs(draft.y1 - draft.y0)}
+              strokeWidth={1.25 / zoom}
+              strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+            />
+          )}
           {(draft?.kind === "highlight" || draft?.kind === "whiteout") && (
             <rect
               x={Math.min(draft.x0, draft.x1)}
@@ -712,6 +771,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
                 width: a.w * zoom,
                 height: a.h * zoom,
                 transform: a.rot ? `rotate(${a.rot}deg)` : undefined,
+                mixBlendMode: a.blend,
                 pointerEvents: selectable ? "auto" : "none",
                 zIndex: a.id === api.selectedId ? 999 : i + 1,
               }}

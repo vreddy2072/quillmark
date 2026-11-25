@@ -1824,3 +1824,11 @@ rect.whiteout:hover,
 .tool-edittext .textLayer span:hover {
   background: rgba(217, 119, 87, 0.16);
 }
+/* Select block */
+.tool-area .overlay {
+  cursor: crosshair;
+}
+.area-draft {
+  fill: rgba(217, 119, 87, 0.08);
+  stroke: #d97757;
+}

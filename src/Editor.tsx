@@ -66,6 +66,38 @@ type Placing =
 const EMPTY: DocState = { pages: [], annotations: [], fields: {} };
 const PDF_TYPES = [{ description: "PDF documents", accept: { "application/pdf": [".pdf"] } }];
 
+/**
+ * The last item Quillmark put on the clipboard. Pasting it back keeps its
+ * size on the page (a pasted picture from elsewhere comes in at 96 dpi).
+ */
+let lastCopied: { pw: number; ph: number; w: number; h: number } | null = null;
+
+/** Put a selected text box or image on the system clipboard. */
+async function copyAnnotation(a: Annotation): Promise<boolean> {
+  try {
+    if (a.kind === "text") {
+      await navigator.clipboard.writeText(a.text);
+      return true;
+    }
+    if (a.kind !== "image") return false;
+    const img = new Image();
+    img.src = a.src;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    c.getContext("2d")!.drawImage(img, 0, 0);
+    const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/png"));
+    if (!blob) return false;
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    lastCopied = { pw: c.width, ph: c.height, w: a.w, h: a.h };
+    return true;
+  } catch (e) {
+    console.warn("Copy failed", e);
+    return false;
+  }
+}
+
 async function fileToImage(file: File): Promise<{ src: string; w: number; h: number }> {
   const url = URL.createObjectURL(file);
   try {
@@ -504,10 +536,12 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         const { src, w, h } = await fileToImage(f);
         const pageId = currentPageId();
         const vp = pageSize(pageId);
-        // Images come in at 96 dpi, capped to 60% of the page.
-        let iw = (w * 72) / 96;
-        let ih = (h * 72) / 96;
-        const s = Math.min(1, (Math.min(vp.width, vp.height) * 0.6) / Math.max(iw, ih));
+        // Images come in at 96 dpi, capped to 60% of the page; something
+        // copied in Quillmark keeps its size.
+        const own = lastCopied && lastCopied.pw === w && lastCopied.ph === h ? lastCopied : null;
+        let iw = own ? own.w : (w * 72) / 96;
+        let ih = own ? own.h : (h * 72) / 96;
+        const s = own ? Math.min(1, vp.width / iw, vp.height / ih) : Math.min(1, (Math.min(vp.width, vp.height) * 0.6) / Math.max(iw, ih));
         iw *= s;
         ih *= s;
         const cy = visibleMidY(pageId);
@@ -746,6 +780,10 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   // ---- Style changes apply to the selection too -----------------------------
 
   const selected = doc.annotations.find((a) => a.id === selectedId) ?? null;
+  // Picking an item ends any text selection, so Ctrl+C copies the item.
+  useEffect(() => {
+    if (selectedId) window.getSelection()?.removeAllRanges();
+  }, [selectedId]);
 
   const applyToSelected = (patch: Partial<Annotation>, kinds: Annotation["kind"][]) => {
     if (selected && kinds.includes(selected.kind)) {
@@ -819,6 +857,23 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
+      } else if (mod && (k === "c" || k === "x") && selected && !window.getSelection()?.toString()) {
+        // Copy or cut the selected text box or image (e.g. a lifted block).
+        if (selected.kind !== "text" && selected.kind !== "image") return;
+        e.preventDefault();
+        const cut = k === "x";
+        const id = selected.id;
+        copyAnnotation(selected).then((ok) => {
+          if (!ok) {
+            setError("Couldn't copy that to the clipboard.");
+            return;
+          }
+          if (cut) {
+            commitAnns(docRef.current.annotations.filter((a) => a.id !== id));
+            setSelectedId(null);
+            flash("Cut. Press Ctrl+V to paste it on the page you're viewing.");
+          } else flash("Copied. Press Ctrl+V to paste a copy.");
+        });
       } else if (mod && k === "y") {
         e.preventDefault();
         redo();
@@ -849,7 +904,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           ),
         );
       } else if (!mod && !e.altKey && file) {
-        const map: Record<string, Tool> = { v: "select", t: "text", m: "marker", h: "highlight", w: "whiteout", e: "edittext", c: "check", x: "cross" };
+        const map: Record<string, Tool> = { v: "select", t: "text", m: "marker", h: "highlight", w: "whiteout", e: "edittext", b: "area", c: "check", x: "cross" };
         if (map[k]) {
           finishEdit();
           setPlacing(null);
@@ -960,6 +1015,15 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           setSelectedId(a.id);
         }
       },
+      lift: (cover, block) => {
+        finishEdit();
+        // The cover goes underneath everything already added, so only the
+        // page's own content is hidden; the lifted block goes on top.
+        commitAnns([cover, ...docRef.current.annotations, block]);
+        setTool("select");
+        setSelectedId(block.id);
+        flash("Block selected. Drag it to move, Ctrl+X to cut, Ctrl+C to copy, Delete to erase. Ctrl+Z puts it back.");
+      },
       createMany: (list, editId) => {
         commitAnns([...docRef.current.annotations, ...list]);
         if (editId) {
@@ -1019,6 +1083,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   let hint = "";
   if (tool === "place") hint = placing?.kind === "date" ? "Click where the date should go. Esc to cancel." : `Click where the ${placing?.kind === "image" ? placing.role : ""} should go. Esc to cancel.`;
   else if (tool === "highlight") hint = "Drag along a line of text. Hold Shift for a straight line.";
+  else if (tool === "area") hint = "Drag a box around part of the page to pick it up. Then drag it to move it, or press Ctrl+X to cut it.";
   else if (tool === "edittext") hint = "Click a line of the document's text to retype it. The old words are covered over.";
   else if (tool === "whiteout") hint = "Drag over anything to cover it, like correction tape. Double-click a covered area to type new text.";
   else if (tool === "check" || tool === "cross") hint = "Click a box to mark it.";
@@ -1048,6 +1113,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           {toolBtn("highlight", "Highlight", "H", icons.highlight)}
           {toolBtn("whiteout", "Whiteout", "W", icons.whiteout)}
           {toolBtn("edittext", "Edit PDF text", "E", icons.editText)}
+          {toolBtn("area", "Select block", "B", icons.area)}
           <span className="tool-sep" />
           {toolBtn("check", "Check", "C", icons.check)}
           {toolBtn("cross", "Cross", "X", icons.cross)}
