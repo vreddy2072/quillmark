@@ -442,6 +442,82 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
   };
 
   const selectable = tool === "select";
+
+  /**
+   * "Edit PDF text": cover the clicked line of the page's own text with
+   * whiteout and put an editable text box with the same words on top.
+   */
+  const retypeLine = (target: HTMLElement) => {
+    if (api.editingId) {
+      api.finishEdit();
+      return;
+    }
+    const layer = textLayerRef.current;
+    const wrap = wrapRef.current;
+    if (!layer || !wrap || target.tagName !== "SPAN" || !target.textContent?.trim()) return;
+    const origin = wrap.getBoundingClientRect();
+    const box = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return { x: (r.left - origin.left) / zoom, y: (r.top - origin.top) / zoom, w: r.width / zoom, h: r.height / zoom, el };
+    };
+    const hit = box(target);
+    // The rest of the visual line: spans at the same height, without a wide
+    // gap (so table columns stay separate).
+    const row = [...layer.querySelectorAll("span")]
+      .filter((s) => !s.querySelector("span") && s.textContent)
+      .map(box)
+      .filter((b) => Math.abs(b.y - hit.y) < hit.h * 0.35 && Math.abs(b.h - hit.h) < hit.h * 0.35)
+      .sort((a, b) => a.x - b.x);
+    const gapMax = hit.h * 1.2;
+    let i = row.findIndex((b) => b.el === target);
+    if (i < 0) return;
+    let lo = i;
+    let hi = i;
+    while (lo > 0 && row[lo].x - (row[lo - 1].x + row[lo - 1].w) < gapMax) lo--;
+    while (hi < row.length - 1 && row[hi + 1].x - (row[hi].x + row[hi].w) < gapMax) hi++;
+    const line = row.slice(lo, hi + 1);
+    let text = "";
+    line.forEach((b, k) => {
+      const t = b.el.textContent ?? "";
+      if (k && !/\s$/.test(text) && !/^\s/.test(t) && b.x - (line[k - 1].x + line[k - 1].w) > hit.h * 0.15) text += " ";
+      text += t;
+    });
+    text = text.trim();
+    const x0 = Math.min(...line.map((b) => b.x));
+    const y0 = Math.min(...line.map((b) => b.y));
+    const x1 = Math.max(...line.map((b) => b.x + b.w));
+    const y1 = Math.max(...line.map((b) => b.y + b.h));
+    const size = Math.max(4, Math.round(hit.h * 2) / 2);
+    const fam = (target.style.fontFamily || getComputedStyle(target).fontFamily).toLowerCase();
+    const font: TextAnnotation["font"] = /mono|courier/.test(fam) ? "courier" : /sans|arial|helvetica/.test(fam) ? "helvetica" : /serif|times/.test(fam) ? "times" : "helvetica";
+    const pad = size * 0.12;
+    const cover: Annotation = {
+      id: newId(),
+      pageId: pageRef.id,
+      kind: "whiteout",
+      x: x0 - pad,
+      y: y0 - pad,
+      w: x1 - x0 + pad * 2,
+      h: y1 - y0 + pad * 2.5,
+      color: "#FFFFFF",
+    };
+    // Line the new baseline up with the old one (pdf.js puts the span top at
+    // roughly 0.8 em above the baseline).
+    const t: TextAnnotation = {
+      id: newId(),
+      pageId: pageRef.id,
+      kind: "text",
+      x: x0,
+      y: y0 + size * 0.8 - size * FONTS[font].baseline,
+      text,
+      size,
+      color: "#000000",
+      font,
+      bold: false,
+      rot: 0,
+    };
+    api.createMany([cover, t], t.id);
+  };
   const selected = annotations.find((a) => a.id === api.selectedId) ?? null;
 
   // Outline + handle for SVG-drawn selections (text/images draw their own).
@@ -469,6 +545,12 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
           className="textLayer"
           style={{ "--total-scale-factor": zoom } as React.CSSProperties}
           onPointerDown={(e) => {
+            if (tool === "edittext" && e.button === 0) {
+              e.stopPropagation();
+              e.preventDefault();
+              retypeLine(e.target as HTMLElement);
+              return;
+            }
             // While dragging, stretch the end marker over the page so the
             // selection doesn't jump to the start when the pointer leaves the text.
             if (selectable && e.button === 0) {
@@ -809,9 +891,9 @@ function TextBox({
     <div
       ref={register}
       className={`box text-box ${selected ? "selected" : ""}`}
-      style={{ ...style, pointerEvents: tool === "select" || tool === "text" ? "auto" : "none" }}
+      style={{ ...style, pointerEvents: tool === "select" || tool === "text" || tool === "edittext" ? "auto" : "none" }}
       onPointerDown={(e) => {
-        if (tool === "text") {
+        if (tool === "text" || tool === "edittext") {
           e.stopPropagation();
           e.preventDefault();
           if (api.editingId) api.finishEdit();

@@ -73,6 +73,7 @@ export type Tool =
   | "marker"
   | "highlight"
   | "whiteout"
+  | "edittext" // retype a line of the PDF's own text
   | "check"
   | "cross"
   | "place"; // placing a signature / initials / date stamp

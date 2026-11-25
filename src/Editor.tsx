@@ -849,7 +849,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           ),
         );
       } else if (!mod && !e.altKey && file) {
-        const map: Record<string, Tool> = { v: "select", t: "text", m: "marker", h: "highlight", w: "whiteout", c: "check", x: "cross" };
+        const map: Record<string, Tool> = { v: "select", t: "text", m: "marker", h: "highlight", w: "whiteout", e: "edittext", c: "check", x: "cross" };
         if (map[k]) {
           finishEdit();
           setPlacing(null);
@@ -1019,6 +1019,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   let hint = "";
   if (tool === "place") hint = placing?.kind === "date" ? "Click where the date should go. Esc to cancel." : `Click where the ${placing?.kind === "image" ? placing.role : ""} should go. Esc to cancel.`;
   else if (tool === "highlight") hint = "Drag along a line of text. Hold Shift for a straight line.";
+  else if (tool === "edittext") hint = "Click a line of the document's text to retype it. The old words are covered over.";
   else if (tool === "whiteout") hint = "Drag over anything to cover it, like correction tape. Double-click a covered area to type new text.";
   else if (tool === "check" || tool === "cross") hint = "Click a box to mark it.";
 
@@ -1046,6 +1047,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           {toolBtn("marker", "Marker", "M", icons.marker)}
           {toolBtn("highlight", "Highlight", "H", icons.highlight)}
           {toolBtn("whiteout", "Whiteout", "W", icons.whiteout)}
+          {toolBtn("edittext", "Edit PDF text", "E", icons.editText)}
           <span className="tool-sep" />
           {toolBtn("check", "Check", "C", icons.check)}
           {toolBtn("cross", "Cross", "X", icons.cross)}

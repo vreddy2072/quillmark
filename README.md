@@ -81,6 +81,7 @@ extensions now and then; that is expected for an extension you load yourself.
 | Marker | M | Freehand drawing in five colours and three thicknesses. |
 | Highlight | H | Drag a box over text to highlight it. |
 | Whiteout | W | Drag over anything (page text, your marks, text you placed) to cover it like correction tape. Double-click a covered area to type replacement text. |
+| Edit PDF text | E | Click a line of the document's own text: it is covered over and the same words appear in a text box, ready to retype. The font and size are matched as closely as the standard fonts allow. (The old words stay hidden under the cover, so search and copy in other readers may still find them.) |
 | Check / Cross | C / X | Click a box on the form to tick it or cross it. Three sizes. |
 | Sign | S | Draw or type a signature or initials, or stamp today's date. Signatures and initials you save appear in this menu next time. |
 | Image | I | Pick a PNG, JPEG, GIF, WebP or BMP. You can also paste an image (Ctrl+V) or drop one on the window. |

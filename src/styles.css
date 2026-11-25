@@ -1813,3 +1813,14 @@ rect.whiteout:hover,
   user-select: none;
   cursor: default;
 }
+/* Edit PDF text: lines of the document's text can be clicked. */
+.tool-edittext .textLayer {
+  pointer-events: auto;
+}
+.tool-edittext .textLayer span {
+  cursor: text;
+  border-radius: 2px;
+}
+.tool-edittext .textLayer span:hover {
+  background: rgba(217, 119, 87, 0.16);
+}

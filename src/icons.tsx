@@ -137,6 +137,14 @@ export const icons = {
       <path d="M16 10v4" />
     </Icon>
   ),
+  editText: (
+    <Icon>
+      <path d="M4 7V5h10v2" />
+      <path d="M9 5v13" />
+      <path d="M7 18h4" />
+      <path d="M14.5 19.5l5.8-5.8a1.4 1.4 0 0 0-2-2l-5.8 5.8-.6 2.6z" />
+    </Icon>
+  ),
   search: (
     <Icon>
       <circle cx="11" cy="11" r="7" />
