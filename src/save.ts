@@ -19,7 +19,7 @@ import {
 import type { PDFPageProxy, Widget } from "./pdf";
 import { viewportFor } from "./pdf";
 import { embedEditable } from "./editable";
-import { rotatePoint, smoothPath } from "./geometry";
+import { arrowHead, rotatePoint, smoothPath } from "./geometry";
 import {
   FONTS,
   HIGHLIGHT_OPACITY,
@@ -121,6 +121,11 @@ export async function buildEditedPdf(
 
   await fillFields(doc, state.fields, originalFields, () => font(StandardFonts.Helvetica));
 
+  // Blank pages added in Quillmark.
+  const unchanged =
+    state.pages.length === libPages.length && state.pages.every((p, i) => p.src === i && !p.blank);
+  for (const ref of state.pages) if (ref.blank) libPages[ref.src] = doc.addPage([ref.blank.w, ref.blank.h]);
+
   for (const ref of state.pages) {
     const page = libPages[ref.src];
     const vp = viewportFor(pdfPages[ref.src], ref.rot);
@@ -191,6 +196,29 @@ export async function buildEditedPdf(
           });
         }
         page.pushOperators(popGraphicsState());
+      } else if (a.kind === "shape") {
+        const color = hexToRgb(a.color);
+        if (a.shape === "line" || a.shape === "arrow") {
+          const segs: [Point, Point][] = [[[a.x1, a.y1], [a.x2, a.y2]]];
+          if (a.shape === "arrow") {
+            const [h1, h2] = arrowHead(a.x1, a.y1, a.x2, a.y2, a.width);
+            segs.push([h1, [a.x2, a.y2]], [h2, [a.x2, a.y2]]);
+          }
+          for (const [p, q] of segs) {
+            const [sx, sy] = toPdf(p);
+            const [ex, ey] = toPdf(q);
+            page.drawLine({ start: { x: sx, y: sy }, end: { x: ex, y: ey }, thickness: a.width, color, lineCap: LineCapStyle.Round });
+          }
+        } else {
+          const [px1, py1] = toPdf([a.x1, a.y1]);
+          const [px2, py2] = toPdf([a.x2, a.y2]);
+          const x = Math.min(px1, px2);
+          const y = Math.min(py1, py2);
+          const w = Math.abs(px2 - px1);
+          const h = Math.abs(py2 - py1);
+          if (a.shape === "rect") page.drawRectangle({ x, y, width: w, height: h, borderColor: color, borderWidth: a.width });
+          else page.drawEllipse({ x: x + w / 2, y: y + h / 2, xScale: w / 2, yScale: h / 2, borderColor: color, borderWidth: a.width });
+        }
       } else if (a.kind === "text") {
         if (!a.text.trim()) continue;
         const f = await font(STD[a.font][a.bold ? 1 : 0]);
@@ -231,10 +259,8 @@ export async function buildEditedPdf(
   }
 
   // Page order and deletions.
-  const unchanged =
-    state.pages.length === libPages.length && state.pages.every((p, i) => p.src === i);
   if (!unchanged) {
-    for (let i = libPages.length - 1; i >= 0; i--) doc.removePage(i);
+    for (let i = doc.getPageCount() - 1; i >= 0; i--) doc.removePage(i);
     state.pages.forEach((ref, i) => doc.insertPage(i, libPages[ref.src]));
   }
   // Keep the changes editable when Quillmark opens this file again.

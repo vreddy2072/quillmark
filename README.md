@@ -83,6 +83,8 @@ extensions now and then; that is expected for an extension you load yourself.
 | Whiteout | W | Drag over anything (page text, your marks, text you placed) to cover it like correction tape. Double-click a covered area to type replacement text. |
 | Edit PDF text | E | Click a line of the document's own text: it is covered over and the same words appear in a text box, ready to retype. The font and size are matched as closely as the standard fonts allow. (The old words stay hidden under the cover, so search and copy in other readers may still find them.) |
 | Select block | B | Drag a box around any part of the page to mark it, including anything you added there (text boxes, pasted items, marks). Marking changes nothing: Esc or a click elsewhere lets go. Drag the marked box to move it (even over other content, its white background stays see-through), Ctrl+X to cut it, Ctrl+C to copy it, Delete to erase it; Ctrl+V pastes a cut or copied block on the page you are viewing. Ctrl+Z puts it back. |
+| Line, Arrow | L, A | Drag to draw in the current colour and size. Hold Shift for straight or 45° lines. Drag either end to adjust. |
+| Rectangle, Ellipse | R, O | Drag to draw an outline. Hold Shift for a square or circle. |
 | Check / Cross | C / X | Click a box on the form to tick it or cross it. Three sizes. |
 | Sign | S | Draw or type a signature or initials, or stamp today's date. Signatures and initials you save appear in this menu next time. |
 | Image | I | Pick a PNG, JPEG, GIF, WebP or BMP. You can also paste an image (Ctrl+V) or drop one on the window. |
@@ -94,7 +96,7 @@ opens an empty tab. A dot on a tab means it has unsaved changes, and closing
 it asks first.
 
 **Pages.** The panel on the left shows every page. Click one to jump to it,
-drag one to reorder, and use the buttons on a page to rotate it or delete it.
+drag one to reorder, and use the buttons on a page to rotate it, delete it or add a blank page after it (the + at the top adds one after the current page).
 
 **Find.** Ctrl+F searches the document text and highlights every match; Enter
 moves to the next one.
@@ -106,6 +108,8 @@ can type into, tick or choose from. The values are saved into the fields.
 opened, after asking once. Save as (the small button next to Save, or
 Ctrl+Shift+S) writes a new file and keeps the original. Print (Ctrl+P) prints
 the document with all your edits.
+
+Selected items can be resized from any corner or side. Zooming keeps the same spot of the same page in view.
 
 Also: Ctrl+O open, Ctrl+Z undo, Ctrl+Y redo, Delete removes the selected item, Ctrl+C copies selected document text, Ctrl+V pastes copied text (as a text box you can drag and double-click to edit) or a copied image onto the page you are looking at.
 

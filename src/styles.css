@@ -1846,3 +1846,12 @@ rect.whiteout:hover,
   z-index: 1001;
   pointer-events: none;
 }
+.sidebar-head .sidebar-add {
+  align-self: center;
+  margin-left: 6px;
+}
+.handle.side {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+}

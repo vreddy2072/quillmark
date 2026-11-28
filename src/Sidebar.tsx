@@ -53,9 +53,11 @@ interface Props {
   onRotate: (id: string, dir: 1 | -1) => void;
   onDelete: (id: string) => void;
   onMove: (from: number, to: number) => void;
+  /** Add a blank page after this position. */
+  onInsertBlank: (after: number) => void;
 }
 
-export function Sidebar({ pages, pdfPages, current, onJump, onRotate, onDelete, onMove }: Props) {
+export function Sidebar({ pages, pdfPages, current, onJump, onRotate, onDelete, onMove, onInsertBlank }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -71,6 +73,14 @@ export function Sidebar({ pages, pdfPages, current, onJump, onRotate, onDelete, 
       <div className="sidebar-head">
         <span className="label">Pages</span>
         <span className="sidebar-hint">Drag to reorder</span>
+        <button
+          className="mini sidebar-add"
+          title="Add a blank page after the current page"
+          aria-label="Add blank page"
+          onClick={() => onInsertBlank(current)}
+        >
+          {icons.plus}
+        </button>
       </div>
       <div className="thumbs" ref={listRef}>
         {pages.map((p, i) => (
@@ -112,6 +122,9 @@ export function Sidebar({ pages, pdfPages, current, onJump, onRotate, onDelete, 
                 </button>
                 <button className="mini" title="Rotate right" aria-label={`Rotate page ${i + 1} right`} onClick={() => onRotate(p.id, 1)}>
                   {icons.rotateRight}
+                </button>
+                <button className="mini" title="Add a blank page after this one" aria-label={`Add blank page after page ${i + 1}`} onClick={() => onInsertBlank(i)}>
+                  {icons.plus}
                 </button>
                 <button
                   className="mini danger"

@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { backgroundHex, backgroundToAlpha, rgbHex, sampleBackground } from "./block";
 import { pdfjs, toViewRect, viewportFor, type PDFPageProxy, type Widget } from "./pdf";
-import { inkBounds, rotatePoint, smoothPath } from "./geometry";
+import { arrowHead, inkBounds, rotatePoint, smoothPath, snapShape } from "./geometry";
 import {
   FONTS,
   HIGHLIGHT_OPACITY,
@@ -12,6 +12,8 @@ import {
   type FieldValue,
   type PageRef,
   type Point,
+  type ShapeAnnotation,
+  type ShapeKind,
   type TextAnnotation,
   type Tool,
 } from "./types";
@@ -83,6 +85,7 @@ interface Props {
 
 type Draft =
   | { kind: "ink"; points: Point[]; hl: boolean }
+  | { kind: "shape"; shape: ShapeKind; x0: number; y0: number; x1: number; y1: number }
   | { kind: "highlight" | "whiteout" | "area"; x0: number; y0: number; x1: number; y1: number }
   | null;
 
@@ -189,8 +192,28 @@ function localBox(a: Annotation, el: HTMLElement | null, zoom = 1) {
       return inkBounds(a.points, a.width / 2 + 3);
     case "text":
       return { x: a.x, y: a.y, w: el ? el.offsetWidth / zoom : 0, h: el ? el.offsetHeight / zoom : 0 };
+    case "shape": {
+      const pad = a.shape === "line" || a.shape === "arrow" ? a.width / 2 + 3 : 0;
+      const x = Math.min(a.x1, a.x2) - pad;
+      const y = Math.min(a.y1, a.y2) - pad;
+      return { x, y, w: Math.abs(a.x2 - a.x1) + pad * 2, h: Math.abs(a.y2 - a.y1) + pad * 2 };
+    }
   }
 }
+
+const isShapeTool = (t: Tool): t is ShapeKind => t === "line" || t === "arrow" || t === "rect" || t === "ellipse";
+
+type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+const HANDLES: { h: Handle; fx: number; fy: number; cursor: string }[] = [
+  { h: "nw", fx: 0, fy: 0, cursor: "nwse-resize" },
+  { h: "n", fx: 0.5, fy: 0, cursor: "ns-resize" },
+  { h: "ne", fx: 1, fy: 0, cursor: "nesw-resize" },
+  { h: "e", fx: 1, fy: 0.5, cursor: "ew-resize" },
+  { h: "se", fx: 1, fy: 1, cursor: "nwse-resize" },
+  { h: "s", fx: 0.5, fy: 1, cursor: "ns-resize" },
+  { h: "sw", fx: 0, fy: 1, cursor: "nesw-resize" },
+  { h: "w", fx: 0, fy: 0.5, cursor: "ew-resize" },
+];
 
 export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, widgets, fields, search, api }: Props) {
   const { zoom, tool } = api;
@@ -290,6 +313,9 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
     if (tool === "marker" || tool === "highlight") {
       (e.target as Element).setPointerCapture(e.pointerId);
       setDraft({ kind: "ink", points: [[x, y]], hl: tool === "highlight" });
+    } else if (isShapeTool(tool)) {
+      (e.target as Element).setPointerCapture(e.pointerId);
+      setDraft({ kind: "shape", shape: tool, x0: x, y0: y, x1: x, y1: y });
     } else if (tool === "whiteout" || tool === "area") {
       (e.target as Element).setPointerCapture(e.pointerId);
       setDraft({ kind: tool, x0: x, y0: y, x1: x, y1: y });
@@ -339,6 +365,9 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       const last = draft.points[draft.points.length - 1];
       if (Math.hypot(x - last[0], y - last[1]) * zoom < 1.5) return;
       setDraft({ ...draft, points: [...draft.points, [x, y]] });
+    } else if (draft.kind === "shape" && e.shiftKey) {
+      const [sx, sy] = snapShape(draft.shape, draft.x0, draft.y0, x, y);
+      setDraft({ ...draft, x1: sx, y1: sy });
     } else {
       setDraft({ ...draft, x1: x, y1: y });
     }
@@ -353,6 +382,25 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
         api.create({ id: newId(), pageId: pageRef.id, kind: "ink", points: pts, color: api.highlightColor, width: api.highlightWidth, hl: true });
       } else {
         api.create({ id: newId(), pageId: pageRef.id, kind: "ink", points: draft.points, color: api.color, width: api.markerWidth });
+      }
+    } else if (draft.kind === "shape") {
+      if (Math.hypot(draft.x1 - draft.x0, draft.y1 - draft.y0) * zoom > 3) {
+        const box = draft.shape === "rect" || draft.shape === "ellipse";
+        api.create(
+          {
+            id: newId(),
+            pageId: pageRef.id,
+            kind: "shape",
+            shape: draft.shape,
+            x1: box ? Math.min(draft.x0, draft.x1) : draft.x0,
+            y1: box ? Math.min(draft.y0, draft.y1) : draft.y0,
+            x2: box ? Math.max(draft.x0, draft.x1) : draft.x1,
+            y2: box ? Math.max(draft.y0, draft.y1) : draft.y1,
+            color: api.color,
+            width: api.markerWidth,
+          },
+          { keepTool: true },
+        );
       }
     } else {
       const x = Math.min(draft.x0, draft.x1);
@@ -469,6 +517,8 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
       }
       if (orig.kind === "ink") {
         api.updateLive(orig.id, { points: orig.points.map(([px, py]) => [px + dx, py + dy] as Point) });
+      } else if (orig.kind === "shape") {
+        api.updateLive(orig.id, { x1: orig.x1 + dx, y1: orig.y1 + dy, x2: orig.x2 + dx, y2: orig.y2 + dy });
       } else {
         api.updateLive(orig.id, { x: orig.x + dx, y: orig.y + dy });
       }
@@ -513,6 +563,98 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
           points: a.points.map(([px, py]) => [box.x + (px - box.x) * sx, box.y + (py - box.y) * sy] as Point),
         });
       }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /** Resize from any corner or side (items that aren't turned). */
+  const startHandle = (e: React.PointerEvent, a: Annotation, hd: Handle) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const b0 = localBox(a, textEls.current.get(a.id) ?? null, zoom);
+    if (!b0.w || !b0.h) return;
+    api.checkpoint();
+    const L = hd.includes("w");
+    const R = hd.includes("e");
+    const T = hd.startsWith("n");
+    const B = hd.startsWith("s");
+    const corner = (L || R) && (T || B);
+    const MIN = 6;
+    const move = (ev: PointerEvent) => {
+      const [px, py] = toPage(ev);
+      let x0 = b0.x;
+      let y0 = b0.y;
+      let x1 = b0.x + b0.w;
+      let y1 = b0.y + b0.h;
+      if (L) x0 = Math.min(px, x1 - MIN);
+      if (R) x1 = Math.max(px, x0 + MIN);
+      if (T) y0 = Math.min(py, y1 - MIN);
+      if (B) y1 = Math.max(py, y0 + MIN);
+      // Pictures, text and marks keep their proportions from a corner.
+      const uniform = a.kind === "text" || a.kind === "mark" || (a.kind === "image" && corner);
+      if (uniform) {
+        const k = corner
+          ? Math.max((x1 - x0) / b0.w, (y1 - y0) / b0.h)
+          : L || R
+            ? (x1 - x0) / b0.w
+            : (y1 - y0) / b0.h;
+        const nw = Math.max(MIN, b0.w * k);
+        const nh = Math.max(MIN, b0.h * k);
+        if (L) x0 = b0.x + b0.w - nw;
+        else x1 = x0 + nw;
+        if (T) y0 = b0.y + b0.h - nh;
+        else y1 = y0 + nh;
+        // Sides scale around the middle of the other direction.
+        if (!corner && (L || R)) {
+          y0 = b0.y + (b0.h - nh) / 2;
+          y1 = y0 + nh;
+        }
+        if (!corner && (T || B)) {
+          x0 = b0.x + (b0.w - nw) / 2;
+          x1 = x0 + nw;
+        }
+      }
+      const nb = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      if (a.kind === "image" || a.kind === "highlight" || a.kind === "whiteout") {
+        api.updateLive(a.id, nb);
+      } else if (a.kind === "mark") {
+        api.updateLive(a.id, { x: nb.x, y: nb.y, size: Math.max(nb.w, nb.h) });
+      } else if (a.kind === "text") {
+        const k = nb.w / b0.w;
+        api.updateLive(a.id, { x: nb.x, y: nb.y, size: Math.round(Math.max(4, Math.min(144, a.size * k)) * 2) / 2 });
+      } else if (a.kind === "ink") {
+        const sx = nb.w / b0.w;
+        const sy = nb.h / b0.h;
+        api.updateLive(a.id, {
+          points: a.points.map(([qx, qy]) => [nb.x + (qx - b0.x) * sx, nb.y + (qy - b0.y) * sy] as Point),
+        });
+      } else if (a.kind === "shape") {
+        api.updateLive(a.id, { x1: nb.x, y1: nb.y, x2: nb.x + nb.w, y2: nb.y + nb.h });
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /** Drag one end of a line or arrow. */
+  const startEndpoint = (e: React.PointerEvent, a: ShapeAnnotation, end: 1 | 2) => {
+    e.stopPropagation();
+    e.preventDefault();
+    api.checkpoint();
+    const move = (ev: PointerEvent) => {
+      let [px, py] = toPage(ev);
+      const [ox, oy] = end === 1 ? [a.x2, a.y2] : [a.x1, a.y1];
+      if (ev.shiftKey) [px, py] = snapShape(a.shape, ox, oy, px, py);
+      api.updateLive(a.id, end === 1 ? { x1: px, y1: py } : { x2: px, y2: py });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -600,6 +742,13 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
     api.createMany([cover, t], t.id);
   };
   const selected = annotations.find((a) => a.id === api.selectedId) ?? null;
+  // A text box's size is only known once it's on screen, so draw its resize
+  // handles again after it appears or changes.
+  const [, remeasure] = useState(0);
+  const selText = selected?.kind === "text" ? `${selected.text}|${selected.size}|${selected.font}|${selected.bold}` : "";
+  useEffect(() => {
+    if (selText) remeasure((n) => n + 1);
+  }, [api.selectedId, selText, zoom]);
 
   // Outline + handle for SVG-drawn selections (text/images draw their own).
   let selBox: { x: number; y: number; w: number; h: number } | null = null;
@@ -688,7 +837,47 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
                   />
                 </g>
               );
-          else if (a.kind === "ink")
+          else if (a.kind === "shape") {
+            const line = a.shape === "line" || a.shape === "arrow";
+            const head = a.shape === "arrow" ? arrowHead(a.x1, a.y1, a.x2, a.y2, a.width) : null;
+            const d = line
+              ? `M ${a.x1} ${a.y1} L ${a.x2} ${a.y2}` + (head ? ` M ${head[0][0]} ${head[0][1]} L ${a.x2} ${a.y2} L ${head[1][0]} ${head[1][1]}` : "")
+              : "";
+            const common = { fill: "none", stroke: a.color, strokeWidth: a.width, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+            const hit = {
+              fill: "none",
+              stroke: "transparent",
+              strokeWidth: Math.max(a.width, 10 / zoom),
+              style: { pointerEvents: selectable ? ("stroke" as const) : ("none" as const) },
+              onPointerDown: (e: React.PointerEvent) => startMove(e, a),
+            };
+            const cx = (a.x1 + a.x2) / 2;
+            const cy = (a.y1 + a.y2) / 2;
+            const rx = Math.abs(a.x2 - a.x1) / 2;
+            const ry = Math.abs(a.y2 - a.y1) / 2;
+            const rx0 = Math.min(a.x1, a.x2);
+            const ry0 = Math.min(a.y1, a.y2);
+            item = (
+              <g data-kind={`shape-${a.shape}`}>
+                {line ? (
+                  <>
+                    <path d={d} {...common} pointerEvents="none" />
+                    <path d={d} {...hit} />
+                  </>
+                ) : a.shape === "rect" ? (
+                  <>
+                    <rect x={rx0} y={ry0} width={rx * 2} height={ry * 2} {...common} pointerEvents="none" />
+                    <rect x={rx0} y={ry0} width={rx * 2} height={ry * 2} {...hit} />
+                  </>
+                ) : (
+                  <>
+                    <ellipse cx={cx} cy={cy} rx={rx} ry={ry} {...common} pointerEvents="none" />
+                    <ellipse cx={cx} cy={cy} rx={rx} ry={ry} {...hit} />
+                  </>
+                )}
+              </g>
+            );
+          } else if (a.kind === "ink")
             item = (
                 <g data-kind={a.hl ? "hl" : "ink"}>
                   <path
@@ -731,6 +920,22 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
               height={r.h}
             />
           ))}
+          {draft?.kind === "shape" &&
+            (() => {
+              const st = { fill: "none", stroke: api.color, strokeWidth: api.markerWidth, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+              const { shape, x0, y0, x1, y1 } = draft;
+              if (shape === "line" || shape === "arrow") {
+                const hd = shape === "arrow" ? arrowHead(x0, y0, x1, y1, api.markerWidth) : null;
+                return <path d={`M ${x0} ${y0} L ${x1} ${y1}` + (hd ? ` M ${hd[0][0]} ${hd[0][1]} L ${x1} ${y1} L ${hd[1][0]} ${hd[1][1]}` : "")} {...st} />;
+              }
+              const rx = Math.abs(x1 - x0) / 2;
+              const ry = Math.abs(y1 - y0) / 2;
+              return shape === "rect" ? (
+                <rect x={Math.min(x0, x1)} y={Math.min(y0, y1)} width={rx * 2} height={ry * 2} {...st} />
+              ) : (
+                <ellipse cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={rx} ry={ry} {...st} />
+              );
+            })()}
           {draft?.kind === "ink" && (
             <path
               d={smoothPath(draft.points)}
@@ -780,14 +985,30 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
           )}
         </svg>
 
-        {selBox && selected && tool === "select" && (
-          <div
-            className="handle"
-            title="Drag to resize"
-            style={{ left: (selBox.x + selBox.w) * zoom, top: (selBox.y + selBox.h) * zoom, zIndex: 1001 }}
-            onPointerDown={(e) => startResize(e, selected)}
-          />
-        )}
+        {selected && tool === "select" && !api.editingId && (() => {
+          if (selected.kind === "shape" && (selected.shape === "line" || selected.shape === "arrow"))
+            return ([1, 2] as const).map((end) => (
+              <div
+                key={end}
+                className="handle"
+                title="Drag to move this end"
+                style={{ left: (end === 1 ? selected.x1 : selected.x2) * zoom, top: (end === 1 ? selected.y1 : selected.y2) * zoom, zIndex: 1001, cursor: "move" }}
+                onPointerDown={(e) => startEndpoint(e, selected, end)}
+              />
+            ));
+          if ((selected.kind === "text" || selected.kind === "image") && selected.rot) return null;
+          const b = localBox(selected, textEls.current.get(selected.id) ?? null, zoom);
+          if (!b.w || !b.h) return null;
+          return HANDLES.map(({ h: hd, fx, fy, cursor }) => (
+            <div
+              key={hd}
+              className={`handle ${fx === 0.5 || fy === 0.5 ? "side" : ""}`}
+              title="Drag to resize"
+              style={{ left: (b.x + b.w * fx) * zoom, top: (b.y + b.h * fy) * zoom, zIndex: 1001, cursor }}
+              onPointerDown={(e) => startHandle(e, selected, hd)}
+            />
+          ));
+        })()}
 
         {widgets.map((wd) => (
           <FieldInput key={wd.id} widget={wd} vpConvert={(r) => toViewRect(vp, r)} zoom={zoom} value={fields[wd.name]} api={api} />
@@ -812,7 +1033,7 @@ export const PageView = memo(function PageView({ pdfPage, pageRef, annotations, 
               onPointerDown={(e) => startMove(e, a)}
             >
               <img src={a.src} alt="" draggable={false} />
-              {a.id === api.selectedId && tool === "select" && (
+              {a.id === api.selectedId && tool === "select" && !!a.rot && (
                 <div className="handle" title="Drag to resize" style={{ left: a.w * zoom, top: a.h * zoom }} onPointerDown={(e) => startResize(e, a)} />
               )}
             </div>
@@ -999,7 +1220,7 @@ function TextBox({
       onDoubleClick={() => api.startEdit(a.id)}
     >
       {a.text}
-      {selected && tool === "select" && <span className="handle text-handle" title="Drag to resize" onPointerDown={onResizeStart} />}
+      {selected && tool === "select" && !!a.rot && <span className="handle text-handle" title="Drag to resize" onPointerDown={onResizeStart} />}
     </div>
   );
 }

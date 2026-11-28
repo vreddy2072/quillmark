@@ -62,7 +62,22 @@ export interface MarkAnnotation extends Base {
   color: string;
 }
 
+export type ShapeKind = "line" | "arrow" | "rect" | "ellipse";
+
+export interface ShapeAnnotation extends Base {
+  kind: "shape";
+  shape: ShapeKind;
+  /** Line/arrow: start and end (the arrowhead is at x2, y2). Rect/ellipse: opposite corners. */
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  width: number;
+}
+
 export type Annotation =
+  | ShapeAnnotation
   | TextAnnotation
   | InkAnnotation
   | RectAnnotation
@@ -77,6 +92,7 @@ export type Tool =
   | "whiteout"
   | "edittext" // retype a line of the PDF's own text
   | "area" // select a block of the page to move, cut or copy
+  | ShapeKind
   | "check"
   | "cross"
   | "place"; // placing a signature / initials / date stamp
@@ -85,6 +101,8 @@ export interface PageRef {
   id: string;
   src: number; // 0-based page index in the original file
   rot: number; // extra clockwise rotation added in this app: 0, 90, 180, 270
+  /** A blank page added in Quillmark (size in points); `src` then points past the original pages. */
+  blank?: { w: number; h: number };
 }
 
 export type FieldValue = string | boolean | string[];

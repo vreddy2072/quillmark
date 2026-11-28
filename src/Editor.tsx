@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { icons } from "./icons";
-import { openPdf, viewportFor, type OpenedPdf } from "./pdf";
+import { blankPages, openPdf, viewportFor, type OpenedPdf } from "./pdf";
 import { PageView, type PageApi, type PendingBlock, type SearchRect } from "./PageView";
 import { Sidebar } from "./Sidebar";
 import { SignatureDialog, loadSignatures, storeSignatures, type SavedSignature } from "./SignatureDialog";
@@ -291,6 +291,12 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         const ex = await extractEditable(bytes);
         if (ex?.kind === "editable") bytes = new Uint8Array(ex.original);
         const pdf = await openPdf(bytes);
+        // Blank pages added last time come back too.
+        if (ex?.kind === "editable") {
+          const blanks = ex.state.pages.filter((p) => p.blank);
+          const made = await blankPages(blanks.map((p) => p.blank!));
+          blanks.forEach((p, i) => (pdf.pages[p.src] = made[i]));
+        }
         file?.pdf.destroy();
         // A tab opened in the background is hidden (width 0), so estimate
         // the viewer width from the window: thumbnails + options rail.
@@ -298,7 +304,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
         const maxW = Math.max(...pdf.pages.map((p) => viewportFor(p, 0).width));
         setZoom(Math.round(Math.min(1.5, Math.max(0.5, avail / maxW)) * 100) / 100);
         setFile({ name: f.name, bytes, pdf, handle, overwriteOk: false });
-        const restored = ex?.kind === "editable" && ex.state.pages.every((p) => p.src < pdf.pages.length) ? ex.state : null;
+        const restored = ex?.kind === "editable" && ex.state.pages.every((p) => !!pdf.pages[p.src]) ? ex.state : null;
         setDoc(
           restored
             ? { pages: restored.pages, annotations: restored.annotations, fields: { ...pdf.fields, ...restored.fields } }
@@ -447,6 +453,29 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
       flash("Page deleted. Ctrl+Z brings it back.");
     },
     [commit],
+  );
+
+  /** Add a blank page after the given position, the same size as the page there. */
+  const insertBlankPage = useCallback(
+    async (after: number) => {
+      if (!file) return;
+      const d = docRef.current;
+      const near = d.pages[Math.min(Math.max(after, 0), d.pages.length - 1)];
+      const vp = viewportFor(file.pdf.pages[near.src], near.rot);
+      const size = { w: Math.round(vp.width * 100) / 100, h: Math.round(vp.height * 100) / 100 };
+      const [proxy] = await blankPages([size]);
+      const src = file.pdf.pages.length;
+      file.pdf.pages.push(proxy);
+      const ref = { id: newId(), src, rot: 0, blank: size };
+      const cur = docRef.current;
+      const pages = [...cur.pages];
+      pages.splice(after + 1, 0, ref);
+      commit({ ...cur, pages });
+      flash("Blank page added. Ctrl+Z removes it.");
+      requestAnimationFrame(() => jumpTo(after + 1));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [file, commit],
   );
 
   const movePage = useCallback(
@@ -823,7 +852,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   const selHl = selected?.kind === "ink" && !!selected.hl;
   const pickColor = (c: string) => {
     setColor(c);
-    if (!selHl) applyToSelected({ color: c }, ["ink", "text", "mark"]);
+    if (!selHl) applyToSelected({ color: c }, ["ink", "text", "mark", "shape"]);
   };
   const pickHighlight = (c: string) => {
     setHighlightColor(c);
@@ -831,7 +860,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   };
   const pickWidth = (wd: number) => {
     setMarkerWidth(wd);
-    if (!selHl) applyToSelected({ width: wd }, ["ink"]);
+    if (!selHl) applyToSelected({ width: wd }, ["ink", "shape"]);
   };
   const pickHlWidth = (wd: number) => {
     setHighlightWidth(wd);
@@ -974,11 +1003,13 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
               ? a
               : a.kind === "ink"
                 ? { ...a, points: a.points.map(([x, y]) => [x + dx, y + dy] as [number, number]) }
-                : { ...a, x: a.x + dx, y: a.y + dy },
+                : a.kind === "shape"
+                  ? { ...a, x1: a.x1 + dx, y1: a.y1 + dy, x2: a.x2 + dx, y2: a.y2 + dy }
+                  : { ...a, x: a.x + dx, y: a.y + dy },
           ),
         );
       } else if (!mod && !e.altKey && file) {
-        const map: Record<string, Tool> = { v: "select", t: "text", m: "marker", h: "highlight", w: "whiteout", e: "edittext", b: "area", c: "check", x: "cross" };
+        const map: Record<string, Tool> = { v: "select", t: "text", m: "marker", h: "highlight", w: "whiteout", e: "edittext", b: "area", l: "line", a: "arrow", r: "rect", o: "ellipse", c: "check", x: "cross" };
         if (map[k]) {
           finishEdit();
           setPlacing(null);
@@ -1061,11 +1092,46 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
     setCurrentPage(best);
   };
 
+  // Zooming keeps the spot in the middle of the viewer where it was: note
+  // which page (and where on it) is in the middle now, and scroll back to it
+  // once the pages have their new size.
+  const zoomAnchor = useRef<{ pageId: string; fx: number; fy: number } | null>(null);
+  const zoomTo = (z: number) => {
+    const next = clampZoom(z);
+    if (next === zoom) return;
+    const sc = scrollRef.current;
+    const pageId = file ? pageInView() : null;
+    const el = pageId ? sc?.querySelector<HTMLElement>(`[data-page-id="${pageId}"]`) : null;
+    if (sc && el && pageId) {
+      const v = sc.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const cx = v.left + sc.clientWidth / 2;
+      const cy = v.top + sc.clientHeight / 2;
+      zoomAnchor.current = {
+        pageId,
+        fx: Math.min(1, Math.max(0, (cx - r.left) / r.width)),
+        fy: Math.min(1, Math.max(0, (cy - r.top) / r.height)),
+      };
+    }
+    setZoom(next);
+  };
+  useLayoutEffect(() => {
+    const a = zoomAnchor.current;
+    zoomAnchor.current = null;
+    const sc = scrollRef.current;
+    const el = a && sc?.querySelector<HTMLElement>(`[data-page-id="${a.pageId}"]`);
+    if (!a || !sc || !el) return;
+    const v = sc.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    sc.scrollTop += r.top + a.fy * r.height - (v.top + sc.clientHeight / 2);
+    sc.scrollLeft += r.left + a.fx * r.width - (v.left + sc.clientWidth / 2);
+  }, [zoom]);
+
   // From a fitted value like 137%, the first step lands on 150% or 125%.
   const changeZoom = (dir: 1 | -1) => {
     const steps = zoom / ZOOM_STEP;
     const next = dir > 0 ? (Math.floor(steps + 1e-6) + 1) * ZOOM_STEP : (Math.ceil(steps - 1e-6) - 1) * ZOOM_STEP;
-    setZoom(clampZoom(next < ZOOM_MIN ? ZOOM_MIN : next));
+    zoomTo(next < ZOOM_MIN ? ZOOM_MIN : next);
   };
 
   const api: PageApi = useMemo(
@@ -1171,12 +1237,13 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   );
 
   const sk = selected?.kind;
-  const showInk = ["marker", "text", "check", "cross", "whiteout"].includes(tool) || (sk === "ink" && !selHl) || sk === "text" || sk === "mark";
-  const showWidth = tool === "marker" || (sk === "ink" && !selHl);
+  const shapeTool = tool === "line" || tool === "arrow" || tool === "rect" || tool === "ellipse";
+  const showInk = ["marker", "text", "check", "cross", "whiteout"].includes(tool) || shapeTool || (sk === "ink" && !selHl) || sk === "text" || sk === "mark" || sk === "shape";
+  const showWidth = tool === "marker" || shapeTool || (sk === "ink" && !selHl) || sk === "shape";
   const showFont = tool === "text" || tool === "whiteout" || sk === "text" || (tool === "place" && placing?.kind === "date");
   const showHl = tool === "highlight" || sk === "highlight" || selHl;
   const showMark = tool === "check" || tool === "cross" || sk === "mark";
-  const curColor = sk === "ink" || sk === "text" || sk === "mark" ? (selected as { color: string }).color : color;
+  const curColor = sk === "ink" || sk === "text" || sk === "mark" || sk === "shape" ? (selected as { color: string }).color : color;
   const curFont = sk === "text" ? (selected as TextAnnotation).font : font;
   const curSize = sk === "text" ? (selected as TextAnnotation).size : fontSize;
   const curBold = sk === "text" ? (selected as TextAnnotation).bold : bold;
@@ -1184,6 +1251,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
   let hint = "";
   if (tool === "place") hint = placing?.kind === "date" ? "Click where the date should go. Esc to cancel." : `Click where the ${placing?.kind === "image" ? placing.role : ""} should go. Esc to cancel.`;
   else if (tool === "highlight") hint = "Drag along a line of text. Hold Shift for a straight line.";
+  else if (shapeTool) hint = tool === "line" || tool === "arrow" ? "Drag to draw. Hold Shift for straight or 45° lines." : `Drag to draw. Hold Shift for a ${tool === "rect" ? "square" : "circle"}.`;
   else if (tool === "area") hint = "Drag a box around part of the page to pick it up. Then drag it to move it, or press Ctrl+X to cut it.";
   else if (tool === "edittext") hint = "Click a line of the document's text to retype it. The old words are covered over.";
   else if (tool === "whiteout") hint = "Drag over anything to cover it, like correction tape. Double-click a covered area to type new text.";
@@ -1215,6 +1283,11 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
           {toolBtn("whiteout", "Whiteout", "W", icons.whiteout)}
           {toolBtn("edittext", "Edit PDF text", "E", icons.editText)}
           {toolBtn("area", "Select block", "B", icons.area)}
+          <span className="tool-sep" />
+          {toolBtn("line", "Line", "L", icons.line)}
+          {toolBtn("arrow", "Arrow", "A", icons.arrow)}
+          {toolBtn("rect", "Rectangle", "R", icons.rect)}
+          {toolBtn("ellipse", "Ellipse / circle", "O", icons.ellipse)}
           <span className="tool-sep" />
           {toolBtn("check", "Check", "C", icons.check)}
           {toolBtn("cross", "Cross", "X", icons.cross)}
@@ -1356,6 +1429,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
             onRotate={rotatePage}
             onDelete={deletePage}
             onMove={movePage}
+            onInsertBlank={insertBlankPage}
           />
         )}
         <div className="viewer-wrap">
@@ -1422,7 +1496,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
               {MARKER_WIDTHS.map((wd) => (
                 <button
                   key={wd}
-                  className={`chip ${(sk === "ink" ? (selected as { width: number }).width : markerWidth) === wd ? "on" : ""}`}
+                  className={`chip ${(sk === "ink" || sk === "shape" ? (selected as { width: number }).width : markerWidth) === wd ? "on" : ""}`}
                   onClick={() => pickWidth(wd)}
                   aria-label={`Marker size ${wd}`}
                 >
@@ -1507,7 +1581,7 @@ export function Editor({ active, initial, initialUrl, onStatus, onOpenMore, hist
               <button className="icon" onClick={() => changeZoom(1)} title="Zoom in" aria-label="Zoom in">
                 {icons.zoomIn}
               </button>
-              <ZoomInput zoom={zoom} onZoom={(z) => setZoom(clampZoom(z))} />
+              <ZoomInput zoom={zoom} onZoom={zoomTo} />
               <button className="icon" onClick={() => changeZoom(-1)} title="Zoom out" aria-label="Zoom out">
                 {icons.zoomOut}
               </button>

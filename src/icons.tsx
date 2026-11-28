@@ -137,6 +137,27 @@ export const icons = {
       <path d="M16 10v4" />
     </Icon>
   ),
+  line: (
+    <Icon>
+      <path d="M5 19L19 5" />
+    </Icon>
+  ),
+  arrow: (
+    <Icon>
+      <path d="M5 19L19 5" />
+      <path d="M10 5h9v9" />
+    </Icon>
+  ),
+  rect: (
+    <Icon>
+      <rect x="4" y="6" width="16" height="12" rx="1" />
+    </Icon>
+  ),
+  ellipse: (
+    <Icon>
+      <ellipse cx="12" cy="12" rx="8.5" ry="6.5" />
+    </Icon>
+  ),
   area: (
     <Icon>
       <rect x="5" y="5" width="14" height="14" rx="1.5" strokeDasharray="3 2.6" />

@@ -113,3 +113,13 @@ export function toViewRect(vp: PageViewport, r: number[]): number[] {
   const [x2, y2] = vp.convertToViewportPoint(r[2], r[3]);
   return [x1, y1, x2, y2];
 }
+
+/** pdf.js pages for blank pages of the given sizes, to show pages added in Quillmark. */
+export async function blankPages(sizes: { w: number; h: number }[]): Promise<PDFPageProxy[]> {
+  if (!sizes.length) return [];
+  const { PDFDocument } = await import("pdf-lib");
+  const d = await PDFDocument.create();
+  for (const s of sizes) d.addPage([s.w, s.h]);
+  const opened = await openPdf(await d.save());
+  return opened.pages;
+}
